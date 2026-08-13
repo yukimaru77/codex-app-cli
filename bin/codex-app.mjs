@@ -689,9 +689,38 @@ export function transcriptMessages(records) {
   });
 }
 
+export function turnStatus(records) {
+  let result = { status: 'idle', turnId: null, updatedAt: null };
+  for (const record of records) {
+    const payload = record?.payload;
+    if (record?.type !== 'event_msg') continue;
+    if (payload?.type === 'task_started') {
+      result = {
+        status: 'inProgress',
+        turnId: payload.turn_id ?? null,
+        updatedAt: record.timestamp ?? null,
+      };
+    } else if (payload?.type === 'task_complete') {
+      result = {
+        status: 'completed',
+        turnId: payload.turn_id ?? result.turnId,
+        updatedAt: record.timestamp ?? null,
+      };
+    } else if (payload?.type === 'turn_aborted') {
+      result = {
+        status: 'aborted',
+        turnId: payload.turn_id ?? result.turnId,
+        updatedAt: record.timestamp ?? null,
+      };
+    }
+  }
+  return result;
+}
+
 function usage() {
   process.stdout.write(`Usage:
   codex-app status [--socket <path>]
+  codex-app turn-status --conversation <id>
   codex-app list [--cwd <path>] [--limit <n>] [--archived] [--json]
   codex-app read --conversation <id> [--json]
   codex-app recognize --rollout <jsonl> --session-id <id> --cwd <workspace> [--name <name>] [--text <first instruction>] [--dry-run]
@@ -729,6 +758,20 @@ async function run(argv) {
     await client.connect();
     printJson({ ok: true, socketPath, clientId: client.clientId });
     client.close();
+    return;
+  }
+
+  if (command === 'turn-status') {
+    if (!options.conversation) throw new Error('turn-status requires --conversation <id>');
+    const rows = queryState(`SELECT rollout_path FROM threads WHERE id = ${sqlString(options.conversation)} LIMIT 1`);
+    const rolloutPath = rows[0]?.rollout_path;
+    if (!rolloutPath) throw new Error(`conversation not found: ${options.conversation}`);
+    const records = fs.readFileSync(rolloutPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    printJson({
+      ok: true,
+      conversationId: options.conversation,
+      ...turnStatus(records),
+    });
     return;
   }
 

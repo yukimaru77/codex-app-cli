@@ -38,6 +38,7 @@ There are no runtime npm dependencies.
 | Command | What it uses | Purpose |
 | --- | --- | --- |
 | `status` | private App IPC | Verify that the local App IPC router is reachable. |
+| `turn-status` | state database + rollout JSONL | Report the latest turn lifecycle status. |
 | `list` | `~/.codex/state_5.sqlite` | List locally stored conversations. |
 | `read` | state database + rollout JSONL | Print a conversation transcript. |
 | `open` | state database + `codex://` deep link | Open an existing conversation in the App. |
@@ -53,7 +54,10 @@ There are no runtime npm dependencies.
 codex-app list --cwd "$PWD" --limit 10
 codex-app read --conversation '<thread-id>'
 codex-app read --conversation '<thread-id>' --json
+codex-app turn-status --conversation '<thread-id>'
 ```
+
+`turn-status` reports `idle`, `inProgress`, `completed`, or `aborted` from the latest lifecycle event in the rollout.
 
 ### Create and immediately run a conversation
 
