@@ -39,6 +39,7 @@ There are no runtime npm dependencies.
 | --- | --- | --- |
 | `status` | private App IPC | Verify that the local App IPC router is reachable. |
 | `turn-status` | state database + rollout JSONL | Report the latest turn lifecycle status. |
+| `rename` | `codex app-server` | Change a conversation's display name and verify it. |
 | `list` | `~/.codex/state_5.sqlite` | List locally stored conversations. |
 | `read` | state database + rollout JSONL | Print a conversation transcript. |
 | `open` | state database + `codex://` deep link | Open an existing conversation in the App. |
@@ -55,6 +56,7 @@ codex-app list --cwd "$PWD" --limit 10
 codex-app read --conversation '<thread-id>'
 codex-app read --conversation '<thread-id>' --json
 codex-app turn-status --conversation '<thread-id>'
+codex-app rename --conversation '<thread-id>' --name 'New chat name'
 ```
 
 `turn-status` reports `idle`, `inProgress`, `completed`, or `aborted` from the latest lifecycle event in the rollout.

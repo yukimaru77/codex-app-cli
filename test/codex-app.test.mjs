@@ -17,6 +17,7 @@ import {
   findSocketPath,
   installRollout,
   recognizeSession,
+  renameThread,
   rolloutDestination,
   transcriptMessages,
   turnStatus,
@@ -51,6 +52,7 @@ test('CLI runs when invoked through an installed symlink', (context) => {
   fs.symlinkSync(path.resolve('bin/codex-app.mjs'), link);
   const output = execFileSync(link, ['help'], { encoding: 'utf8' });
   assert.match(output, /codex-app recognize/);
+  assert.match(output, /codex-app rename/);
 });
 
 test('socket override must point to a Unix socket', async (context) => {
@@ -159,6 +161,23 @@ test('reports the latest turn lifecycle status', () => {
     turnId: null,
     updatedAt: null,
   });
+});
+
+test('renames a thread and verifies the persisted name', async () => {
+  const requests = [];
+  const client = {
+    async request(method, params) {
+      requests.push({ method, params });
+      if (method === 'thread/name/set') return {};
+      return { thread: { id: 'thread-1', name: 'New chat name' } };
+    },
+  };
+  const thread = await renameThread(client, 'thread-1', 'New chat name');
+  assert.equal(thread.name, 'New chat name');
+  assert.deepEqual(requests, [
+    { method: 'thread/name/set', params: { threadId: 'thread-1', name: 'New chat name' } },
+    { method: 'thread/read', params: { threadId: 'thread-1', includeTurns: false } },
+  ]);
 });
 
 test('extracts user and assistant transcript messages', () => {

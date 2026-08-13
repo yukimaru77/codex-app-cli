@@ -717,10 +717,22 @@ export function turnStatus(records) {
   return result;
 }
 
+export async function renameThread(client, threadId, name, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  await client.request('thread/name/set', { threadId, name }, timeoutMs);
+  const result = await client.request('thread/read', { threadId, includeTurns: false }, timeoutMs);
+  const thread = result?.thread;
+  if (thread?.id !== threadId) throw new Error(`thread/read did not return thread: ${threadId}`);
+  if (thread.name !== name) {
+    throw new Error(`thread name mismatch: expected ${JSON.stringify(name)}, got ${JSON.stringify(thread.name)}`);
+  }
+  return thread;
+}
+
 function usage() {
   process.stdout.write(`Usage:
   codex-app status [--socket <path>]
   codex-app turn-status --conversation <id>
+  codex-app rename --conversation <id> --name <name> [--dry-run]
   codex-app list [--cwd <path>] [--limit <n>] [--archived] [--json]
   codex-app read --conversation <id> [--json]
   codex-app recognize --rollout <jsonl> --session-id <id> --cwd <workspace> [--name <name>] [--text <first instruction>] [--dry-run]
@@ -772,6 +784,29 @@ async function run(argv) {
       conversationId: options.conversation,
       ...turnStatus(records),
     });
+    return;
+  }
+
+  if (command === 'rename') {
+    if (!options.conversation) throw new Error('rename requires --conversation <id>');
+    const name = options.name?.trim();
+    if (!name) throw new Error('rename requires a non-empty --name <name>');
+    const rows = queryState(`SELECT id FROM threads WHERE id = ${sqlString(options.conversation)} LIMIT 1`);
+    if (rows.length === 0) throw new Error(`conversation not found: ${options.conversation}`);
+    const params = { threadId: options.conversation, name };
+    if (options['dry-run']) {
+      printJson({ type: 'app-server-request', method: 'thread/name/set', params });
+      return;
+    }
+    const timeoutMs = timeoutFrom(options);
+    const client = new AppServerClient({ timeoutMs });
+    try {
+      await client.start();
+      await renameThread(client, options.conversation, name, timeoutMs);
+      printJson({ ok: true, conversationId: options.conversation, name });
+    } finally {
+      await client.close();
+    }
     return;
   }
 
