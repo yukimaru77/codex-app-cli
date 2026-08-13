@@ -111,11 +111,21 @@ test('builds new-thread deep-link parameters', () => {
 });
 
 test('builds follow-up turn parameters', () => {
-  assert.deepEqual(buildStartTurnParams({ text: 'add a regression test', cwd: '/tmp/project' }), {
+  assert.deepEqual(buildStartTurnParams({
+    text: 'add a regression test',
+    cwd: '/tmp/project',
+    'client-user-message-id': 'message-1',
+  }), {
+    clientUserMessageId: 'message-1',
     input: [{ type: 'text', text: 'add a regression test', text_elements: [] }],
     attachments: [],
     cwd: '/tmp/project',
   });
+});
+
+test('generates one idempotency key for each follow-up turn request', () => {
+  const params = buildStartTurnParams({ text: 'send once' });
+  assert.match(params.clientUserMessageId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 });
 
 test('extracts user and assistant transcript messages', () => {

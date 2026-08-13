@@ -602,6 +602,7 @@ export function buildStartTurnParams(options) {
   const text = textFrom(options);
   if (!text) throw new Error('send requires --text "..." or trailing prompt text');
   const params = {
+    clientUserMessageId: options['client-user-message-id'] ?? randomUUID(),
     input: [{ type: 'text', text, text_elements: [] }],
     attachments: [],
   };
