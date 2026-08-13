@@ -211,6 +211,7 @@ export function restartAppWithThreadProfiles(
     status: "running",
     pid,
     signedAppModified: false,
+    seedProfile: sourceProfile,
     chromeImport,
     seededProfiles,
     runtimeEvent: event,
@@ -256,19 +257,44 @@ export function readRuntimeEvents(logPath = defaultRuntimeLogPath()) {
 }
 
 function quitApp(appPath, { spawnSyncImpl, timeoutMs }) {
-  if (findAppMainProcesses(appPath, { spawnSyncImpl }).length === 0) return;
-  runChecked(
-    spawnSyncImpl,
-    "/usr/bin/osascript",
-    ["-e", `tell application id "${CODEX_BUNDLE_ID}" to quit`],
-    "App quit",
-  );
+  const pids = findAppMainProcesses(appPath, { spawnSyncImpl });
+  if (pids.length === 0) return;
   const deadline = Date.now() + timeoutMs;
+  requestAppQuitWithFallback(spawnSyncImpl, pids, deadline);
   while (Date.now() < deadline) {
     if (findAppMainProcesses(appPath, { spawnSyncImpl }).length === 0) return;
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
   }
   throw new Error("ChatGPT/Codex App did not quit before the timeout");
+}
+
+export function requestAppQuitWithRetry(spawnSyncImpl, deadline) {
+  while (true) {
+    const result = spawnSyncImpl(
+      "/usr/bin/osascript",
+      ["-e", `tell application id "${CODEX_BUNDLE_ID}" to quit`],
+      { encoding: "utf8" },
+    );
+    if (result.error != null) throw result.error;
+    if (result.status === 0) return result;
+    const details = String(result.stderr ?? result.stdout ?? "").trim();
+    if (!details.includes("(-128)") || Date.now() >= deadline) {
+      throw new Error(`App quit failed${details.length > 0 ? `: ${details}` : ""}`);
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+  }
+}
+
+export function requestAppQuitWithFallback(spawnSyncImpl, pids, deadline) {
+  try {
+    return requestAppQuitWithRetry(spawnSyncImpl, Math.min(deadline, Date.now() + 2_000));
+  } catch (error) {
+    if (!error.message.includes("(-128)")) throw error;
+    for (const pid of pids) {
+      runChecked(spawnSyncImpl, "/bin/kill", ["-TERM", String(pid)], "App TERM fallback");
+    }
+    return { status: 0, fallback: "SIGTERM" };
+  }
 }
 
 function waitForAppProcess(appPath, { spawnSyncImpl, timeoutMs }) {

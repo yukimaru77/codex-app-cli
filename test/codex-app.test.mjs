@@ -11,21 +11,26 @@ import {
   AppServerClient,
   CodexAppClient,
   FrameDecoder,
+  activateProfileForNewConversation,
   buildNewThreadParams,
   buildStartTurnParams,
   encodeFrame,
+  finalizeProfileForNewConversation,
   findSocketPath,
   installRollout,
   lastAssistantMessageForTurn,
+  newConversationCreationTimeout,
   recognizeSession,
   renameThread,
   rolloutDestination,
+  selectNewConversationTransferProfile,
   selectedTranscriptMessages,
   transcriptMessages,
   turnStatus,
   validateRollout,
   waitForTurnCompletion,
   waitForAppIpcReady,
+  waitForNewConversation,
 } from '../bin/codex-app.mjs';
 
 function writeRollout(directory, sessionId, records = null) {
@@ -128,6 +133,127 @@ test('waits through transient profile restart IPC failures', async () => {
     socketPath: '/tmp/test-ipc.sock',
     clientId: 'ready-client',
   });
+});
+
+test('activates the requested profile before creating a new conversation', async () => {
+  const calls = [];
+  const result = await activateProfileForNewConversation('chrome:Work', {
+    options: { timeout: '1234' },
+    restartProfile: (from) => {
+      calls.push(['restart', from]);
+      return { status: 'running', seedProfile: 'codex-browser-chrome-import-seed' };
+    },
+    waitForIpc: async (options) => {
+      calls.push(['waitForIpc', options]);
+      return { socketPath: '/tmp/ipc.sock', clientId: 'desktop-client' };
+    },
+  });
+  assert.deepEqual(calls, [
+    ['restart', 'chrome:Work'],
+    ['waitForIpc', { timeoutMs: 1234 }],
+  ]);
+  assert.equal(result.from, 'chrome:Work');
+  assert.equal(result.runtime.seedProfile, 'codex-browser-chrome-import-seed');
+});
+
+test('new profile dry-run describes profile assignment without restarting the App', () => {
+  const output = execFileSync(
+    process.execPath,
+    [path.resolve('bin/codex-app.mjs'), 'new', '--text', 'test', '--profile', 'chrome:Work', '--dry-run'],
+    { encoding: 'utf8' },
+  );
+  const result = JSON.parse(output);
+  assert.deepEqual(result.profile, {
+    from: 'chrome:Work',
+    action: 'restart-and-assign-before-return',
+  });
+});
+
+test('selects the one temporary profile created for the new conversation', () => {
+  const original = 'codex-browser-source';
+  const existing = 'codex-browser-client-new-thread%253aexisting';
+  const created = 'codex-browser-client-new-thread%253acreated';
+  assert.equal(selectNewConversationTransferProfile({
+    beforeProfiles: [original, existing],
+    afterProfiles: [original, existing, created],
+    fallbackProfile: original,
+  }), created);
+  assert.equal(selectNewConversationTransferProfile({
+    beforeProfiles: [original],
+    afterProfiles: [original],
+    fallbackProfile: original,
+  }), original);
+  assert.throws(() => selectNewConversationTransferProfile({
+    beforeProfiles: [],
+    afterProfiles: [
+      'codex-browser-client-new-thread%253aone',
+      'codex-browser-client-new-thread%253atwo',
+    ],
+    fallbackProfile: original,
+  }), /multiple temporary browser profiles/);
+});
+
+test('finalizes the temporary profile only after stopping the App and reopens the conversation', async () => {
+  const calls = [];
+  const conversationId = '01900000-0000-7000-8000-0000000000a1';
+  const result = await finalizeProfileForNewConversation({
+    conversationId,
+    sourceProfile: 'codex-browser-client-new-thread%253acreated',
+    options: { timeout: '4321' },
+    restartProfile: (from, target) => {
+      calls.push(['restart', from, target]);
+      return {
+        seededProfiles: [{
+          threadId: target,
+          profile: `codex-browser-${target}`,
+          source: from,
+          reused: false,
+          backup: null,
+        }],
+      };
+    },
+    waitForIpc: async (options) => {
+      calls.push(['waitForIpc', options]);
+      return { clientId: 'desktop-client' };
+    },
+    openConversation: (target) => calls.push(['open', target]),
+  });
+  assert.deepEqual(calls, [
+    ['restart', 'codex-browser-client-new-thread%253acreated', conversationId],
+    ['waitForIpc', { timeoutMs: 4321 }],
+    ['open', conversationId],
+  ]);
+  assert.equal(result.assignedProfile.profile, `codex-browser-${conversationId}`);
+});
+
+test('allows profile-backed creation enough time for the App restart', () => {
+  assert.equal(newConversationCreationTimeout({}, false), 20_000);
+  assert.equal(newConversationCreationTimeout({}, true), 300_000);
+  assert.equal(newConversationCreationTimeout({ timeout: '1234' }, true), 1234);
+});
+
+test('retries composer submission only until the new conversation appears', async () => {
+  let clock = 0;
+  let queries = 0;
+  let retries = 0;
+  const created = await waitForNewConversation(
+    new Set(['existing']),
+    '/tmp/project',
+    100,
+    {
+      now: () => clock,
+      pollMs: 5,
+      retryAfterMs: 10,
+      delayImpl: async (milliseconds) => { clock += milliseconds; },
+      queryRows: () => {
+        queries += 1;
+        return queries < 4 ? [{ id: 'existing' }] : [{ id: 'created' }];
+      },
+      retrySubmit: () => { retries += 1; },
+    },
+  );
+  assert.equal(created.id, 'created');
+  assert.equal(retries, 1);
 });
 
 test('builds new-thread deep-link parameters', () => {

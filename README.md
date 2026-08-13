@@ -114,12 +114,23 @@ codex-app new \
   --text 'Find the failing tests and fix them.'
 ```
 
+Add `--profile` to select the initial in-app Browser profile for the new session. It accepts the same values as `codex-app profile restart --from`, including Chrome directory and display-name selectors.
+
+```bash
+codex-app new \
+  --cwd "$PWD" \
+  --profile 'chrome:Work' \
+  --text 'Open the product and verify the signed-in flow.'
+```
+
+With `--profile`, `new` starts the profile runtime before opening the composer and waits for the initial turn to finish. It then stops the App so Chromium flushes the temporary new-thread partition, copies that partition to the final session-ID profile, restarts the App, and reopens the session before returning. This preserves Browser changes made during the initial turn. Two sessions created from the same source receive separate copies; choosing a different source produces another separate copy.
+
 `new` opens a prefilled App deep link, activates the App, waits four seconds, presses Return through macOS Accessibility, and then waits for a new local thread record. It does not send `start-conversation` over IPC.
 
 Grant Accessibility permission to the terminal host you use to run the command under **System Settings → Privacy & Security → Accessibility**. Use `--dry-run` to inspect the deep link without opening the App or pressing a key:
 
 ```bash
-codex-app new --cwd "$PWD" --text 'Hello' --dry-run
+codex-app new --cwd "$PWD" --text 'Hello' --profile default --dry-run
 ```
 
 ### Continue, stop, or watch a conversation

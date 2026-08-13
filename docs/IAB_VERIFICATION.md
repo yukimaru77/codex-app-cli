@@ -45,12 +45,32 @@ npm run verify
 確認出力:
 
 ```text
-tests 51
-pass 51
+tests 60
+pass 60
 fail 0
 ```
 
 `verify` は9個すべてのpatch pointについて `occurrences: 1` を返しました。
+
+## `new --profile` のsession作成と初回Browser状態の引き継ぎ
+
+2026-08-14、同じseed profileからA/B、別のseed profileからCを `codex-app new --profile` で作成しました。各sessionの初回turnで未使用originを開き、A/B/Cそれぞれ別のmarkerを全Browser storeへ保存しました。
+
+Bの保存前レポートにはAのmarkerがなく、Cの保存前レポートは全storeが空でした。B/C保存後にAへ戻って保存せず再読込した結果は次のとおりです。
+
+```json
+{"cookie":"FIXED-NEW-PROFILE-A-20260813","cookieSeenByServer":"FIXED-NEW-PROFILE-A-20260813","localStorage":"FIXED-NEW-PROFILE-A-20260813","sessionStorage":null,"indexedDB":"FIXED-NEW-PROFILE-A-20260813","cacheStorage":"FIXED-NEW-PROFILE-A-20260813","serviceWorker":true}
+```
+
+初回turn中の一時partitionはturn完了後に最終session-ID partitionへコピーされました。3つの最終partitionはdirectory inodeとCookies inodeがすべて異なり、filesystem上で抽出したmarkerも各partition自身の値だけでした。
+
+```text
+session A: FIXED-NEW-PROFILE-A-20260813
+session B: FIXED-NEW-PROFILE-B-20260813
+session C: FIXED-NEW-PROFILE-C-20260813
+```
+
+したがって、同じprofileを指定した別sessionも、異なるprofileを指定したsessionも独立し、初回turnの永続store変更は後続turnへ引き継がれます。`sessionStorage` はApp再起動後なので `null` です。
 
 ## Chrome profileの標準importとsession seed
 

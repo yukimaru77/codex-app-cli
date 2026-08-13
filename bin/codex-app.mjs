@@ -8,11 +8,14 @@ import process from 'node:process';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { runProfileCommand } from '../lib/profile-command.mjs';
+import {
+  runProfileCommand,
+} from '../lib/profile-command.mjs';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_TURN_TIMEOUT_MS = 300_000;
 const DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS = 20_000;
+const TEMPORARY_NEW_CONVERSATION_PROFILE_PREFIX = 'codex-browser-client-new-thread%253a';
 const DEFAULT_BOOTSTRAP_TEXT = 'Use the imported conversation context when answering future requests.';
 const VERSION_BY_METHOD = new Map([
   ['thread-owner-discovery', 1],
@@ -242,6 +245,77 @@ export async function waitForAppIpcReady({
     }
   } while (Date.now() < deadline);
   throw new Error(`Codex App IPC did not become ready: ${lastError?.message ?? 'unknown error'}`);
+}
+
+export async function activateProfileForNewConversation(
+  profile,
+  {
+    options = {},
+    env = process.env,
+    restartProfile = (from) => runProfileCommand('restart', { from }, env),
+    waitForIpc = waitForAppIpcReady,
+  } = {},
+) {
+  if (typeof profile !== 'string' || profile.length === 0) {
+    throw new Error('new --profile requires a non-empty profile');
+  }
+  const runtime = restartProfile(profile);
+  if (typeof runtime?.seedProfile !== 'string' || runtime.seedProfile.length === 0) {
+    throw new Error('profile restart did not return its seedProfile');
+  }
+  const ipc = await waitForIpc({
+    timeoutMs: options.timeout == null
+      ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS
+      : timeoutFrom(options),
+  });
+  return { from: profile, runtime, ipc };
+}
+
+export function selectNewConversationTransferProfile({
+  beforeProfiles,
+  afterProfiles,
+  fallbackProfile,
+}) {
+  const before = new Set(beforeProfiles);
+  const created = afterProfiles.filter((profile) =>
+    profile.startsWith(TEMPORARY_NEW_CONVERSATION_PROFILE_PREFIX)
+    && !before.has(profile));
+  if (created.length > 1) {
+    throw new Error(`new conversation created multiple temporary browser profiles: ${created.join(', ')}`);
+  }
+  return created[0] ?? fallbackProfile;
+}
+
+export async function finalizeProfileForNewConversation({
+  conversationId,
+  sourceProfile,
+  options = {},
+  env = process.env,
+  restartProfile = (from, target) => runProfileCommand('restart', {
+    from,
+    conversation: target,
+    replace: true,
+  }, env),
+  waitForIpc = waitForAppIpcReady,
+  openConversation = (target) => openDeepLink(threadDeepLink(target)),
+}) {
+  const runtime = restartProfile(sourceProfile, conversationId);
+  const assignedProfile = runtime.seededProfiles?.find(({ threadId }) => threadId === conversationId);
+  if (assignedProfile == null) {
+    throw new Error(`profile restart did not assign the new conversation: ${conversationId}`);
+  }
+  const ipc = await waitForIpc({
+    timeoutMs: options.timeout == null
+      ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS
+      : timeoutFrom(options),
+  });
+  openConversation(conversationId);
+  return { sourceProfile, assignedProfile, runtime, ipc };
+}
+
+export function newConversationCreationTimeout(options, profileRequested) {
+  if (options.timeout != null) return timeoutFrom(options);
+  return profileRequested ? DEFAULT_TURN_TIMEOUT_MS : DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS;
 }
 
 async function requestWhenHandlerReady(
@@ -687,28 +761,45 @@ function openDeepLink(url) {
   execFileSync('/usr/bin/open', [url], { stdio: 'ignore' });
 }
 
-function submitAppComposer() {
+function submitAppComposer(delaySeconds = 4) {
   execFileSync('/usr/bin/osascript', [
     '-e', 'tell application id "com.openai.codex" to activate',
-    '-e', 'delay 4',
+    '-e', `delay ${delaySeconds}`,
     '-e', 'tell application "System Events" to key code 36',
   ], { stdio: 'ignore' });
 }
 
-async function waitForNewConversation(previousIds, cwd, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  do {
-    const rows = queryState(`
+export async function waitForNewConversation(
+  previousIds,
+  cwd,
+  timeoutMs,
+  {
+    delayImpl = delay,
+    now = Date.now,
+    pollMs = 200,
+    queryRows = () => queryState(`
       SELECT id, cwd, updated_at
       FROM threads
       WHERE cwd = ${sqlString(path.resolve(cwd))}
       ORDER BY updated_at DESC, id DESC
       LIMIT 20
-    `);
+    `),
+    retryAfterMs = 8_000,
+    retrySubmit = null,
+  } = {},
+) {
+  const deadline = now() + timeoutMs;
+  let nextRetryAt = now() + retryAfterMs;
+  do {
+    const rows = queryRows();
     const created = rows.find((row) => !previousIds.has(row.id));
     if (created != null) return created;
-    await delay(200);
-  } while (Date.now() < deadline);
+    if (retrySubmit != null && now() >= nextRetryAt) {
+      retrySubmit();
+      nextRetryAt = now() + retryAfterMs;
+    }
+    await delayImpl(pollMs);
+  } while (now() < deadline);
   throw new Error(`Codex App did not create a new conversation for ${path.resolve(cwd)}`);
 }
 
@@ -832,7 +923,7 @@ function usage() {
   codex-app read --conversation <id> [--all-item] [--json]
   codex-app recognize --rollout <jsonl> --session-id <id> --cwd <workspace> [--name <name>] [--text <first instruction>] [--dry-run]
   codex-app open --conversation <id> [--dry-run]
-  codex-app new --text <prompt> [--cwd <path>] [--dry-run]
+  codex-app new --text <prompt> [--cwd <path>] [--profile <profile>] [--dry-run]
   codex-app send --conversation <id> --text <prompt> [--form <conversation-id>] [--cwd <path>] [--dry-run]
   codex-app stop --conversation <id> [--dry-run]
   codex-app watch [--conversation <id>] [--timeout <ms>]
@@ -1055,22 +1146,72 @@ async function run(argv) {
         type: 'app-deep-link-request',
         url,
         submit: 'Return',
+        ...(options.profile ? {
+          profile: {
+            from: options.profile,
+            action: 'restart-and-assign-before-return',
+          },
+        } : {}),
       });
       return;
     }
+    const profileActivation = options.profile
+      ? await activateProfileForNewConversation(options.profile, { options })
+      : null;
+    const profilesBefore = profileActivation == null
+      ? null
+      : runProfileCommand('list');
     const previousIds = new Set(queryState('SELECT id FROM threads').map((row) => row.id));
     openDeepLink(url);
     submitAppComposer();
     const created = await waitForNewConversation(
       previousIds,
       params.cwd,
-      options.timeout == null ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS : timeoutFrom(options),
+      newConversationCreationTimeout(options, profileActivation != null),
+      { retrySubmit: () => submitAppComposer(1) },
     );
+    let assignedProfile = null;
+    let initialTurn = null;
+    let profileFinalization = null;
+    if (profileActivation != null) {
+      const rows = queryState(`SELECT rollout_path FROM threads WHERE id = ${sqlString(created.id)} LIMIT 1`);
+      const rolloutPath = rows[0]?.rollout_path;
+      if (!rolloutPath) throw new Error(`new conversation has no rollout path: ${created.id}`);
+      const readRecords = () => fs.readFileSync(rolloutPath, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      initialTurn = await waitForTurnCompletion({
+        readRecords,
+        afterRecordCount: 0,
+        timeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
+      });
+      const transferProfile = selectNewConversationTransferProfile({
+        beforeProfiles: profilesBefore,
+        afterProfiles: runProfileCommand('list'),
+        fallbackProfile: profileActivation.runtime.seedProfile,
+      });
+      profileFinalization = await finalizeProfileForNewConversation({
+        conversationId: created.id,
+        sourceProfile: transferProfile,
+        options,
+      });
+      assignedProfile = profileFinalization.assignedProfile;
+    }
     printJson({
       resultType: 'success',
       result: { conversationId: created.id },
       url: threadDeepLink(created.id),
       submitted: true,
+      ...(profileActivation ? {
+        profile: {
+          from: profileActivation.from,
+          seedProfile: profileActivation.runtime.seedProfile,
+          transferProfile: profileFinalization.sourceProfile,
+          assignedProfile,
+          initialTurn,
+        },
+      } : {}),
     });
     return;
   }

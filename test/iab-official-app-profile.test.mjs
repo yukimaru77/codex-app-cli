@@ -18,6 +18,8 @@ import {
   findAppMainProcesses,
   openAppWithRetry,
   readRuntimeEvents,
+  requestAppQuitWithFallback,
+  requestAppQuitWithRetry,
   snapshotImportedChromeProfile,
 } from "../iab/lib/runtime-launcher.mjs";
 
@@ -56,6 +58,43 @@ test("retries the transient Launch Services -600 error", () => {
   );
   assert.equal(result.status, 0);
   assert.equal(calls.length, 2);
+});
+
+test("retries the transient App quit cancellation", () => {
+  const results = [
+    { status: 1, stdout: "", stderr: "execution error: cancelled. (-128)" },
+    { status: 0, stdout: "", stderr: "" },
+  ];
+  const calls = [];
+  const result = requestAppQuitWithRetry(
+    (command, args, options) => {
+      calls.push([command, args, options]);
+      return results.shift();
+    },
+    Date.now() + 1_000,
+  );
+  assert.equal(result.status, 0);
+  assert.equal(calls.length, 2);
+});
+
+test("falls back to TERM when the App repeatedly cancels quit", () => {
+  const calls = [];
+  const result = requestAppQuitWithFallback(
+    (command, args) => {
+      calls.push([command, args]);
+      if (command === "/usr/bin/osascript") {
+        return { status: 1, stdout: "", stderr: "execution error: cancelled. (-128)" };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    },
+    [123, 456],
+    Date.now(),
+  );
+  assert.deepEqual(result, { status: 0, fallback: "SIGTERM" });
+  assert.deepEqual(calls.slice(-2), [
+    ["/bin/kill", ["-TERM", "123"]],
+    ["/bin/kill", ["-TERM", "456"]],
+  ]);
 });
 
 test("builds an import-only launch using an encoded Chrome profile request", (context) => {
