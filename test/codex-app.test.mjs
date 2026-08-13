@@ -19,6 +19,7 @@ import {
   recognizeSession,
   rolloutDestination,
   transcriptMessages,
+  turnStatus,
   validateRollout,
 } from '../bin/codex-app.mjs';
 
@@ -126,6 +127,38 @@ test('builds follow-up turn parameters', () => {
 test('generates one idempotency key for each follow-up turn request', () => {
   const params = buildStartTurnParams({ text: 'send once' });
   assert.match(params.clientUserMessageId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+});
+
+test('reports the latest turn lifecycle status', () => {
+  const records = [
+    { timestamp: 'one', type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-1' } },
+    { timestamp: 'two', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-1' } },
+    { timestamp: 'three', type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-2' } },
+    { timestamp: 'four', type: 'event_msg', payload: { type: 'token_count' } },
+  ];
+  assert.deepEqual(turnStatus(records), {
+    status: 'inProgress',
+    turnId: 'turn-2',
+    updatedAt: 'three',
+  });
+  assert.deepEqual(turnStatus(records.slice(0, 2)), {
+    status: 'completed',
+    turnId: 'turn-1',
+    updatedAt: 'two',
+  });
+  assert.deepEqual(turnStatus([
+    ...records,
+    { timestamp: 'five', type: 'event_msg', payload: { type: 'turn_aborted' } },
+  ]), {
+    status: 'aborted',
+    turnId: 'turn-2',
+    updatedAt: 'five',
+  });
+  assert.deepEqual(turnStatus([]), {
+    status: 'idle',
+    turnId: null,
+    updatedAt: null,
+  });
 });
 
 test('extracts user and assistant transcript messages', () => {
