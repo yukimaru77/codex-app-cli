@@ -8,6 +8,7 @@ import process from 'node:process';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runProfileCommand } from '../lib/profile-command.mjs';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_TURN_TIMEOUT_MS = 300_000;
@@ -212,6 +213,35 @@ export class CodexAppClient {
 
 async function delay(milliseconds) {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+export async function waitForAppIpcReady({
+  timeoutMs = DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS,
+  retryMs = 100,
+  createClient = (attemptTimeoutMs) => new CodexAppClient({
+    socketPath: findSocketPath(),
+    timeoutMs: attemptTimeoutMs,
+    clientType: 'codex-app-cli-profile-readiness',
+  }),
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  do {
+    let client;
+    try {
+      const remaining = Math.max(1, deadline - Date.now());
+      client = createClient(Math.min(1_000, remaining));
+      await client.connect();
+      return { socketPath: client.socketPath, clientId: client.clientId };
+    } catch (error) {
+      lastError = error;
+      if (Date.now() >= deadline) break;
+      await delay(Math.min(retryMs, Math.max(1, deadline - Date.now())));
+    } finally {
+      client?.close();
+    }
+  } while (Date.now() < deadline);
+  throw new Error(`Codex App IPC did not become ready: ${lastError?.message ?? 'unknown error'}`);
 }
 
 async function requestWhenHandlerReady(
@@ -559,7 +589,7 @@ function assertSuccess(response, method) {
 function parseArgs(argv) {
   const [command, ...tokens] = argv;
   const options = { _: [] };
-  const booleans = new Set(['all-item', 'archived', 'dry-run', 'json']);
+  const booleans = new Set(['all-item', 'archived', 'dry-run', 'json', 'replace']);
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
@@ -574,7 +604,12 @@ function parseArgs(argv) {
     }
     const value = tokens[index + 1];
     if (value == null || value.startsWith('--')) throw new Error(`Missing value for --${key}`);
-    options[key] = value;
+    if (key === 'thread') {
+      options.thread ??= [];
+      options.thread.push(value);
+    } else {
+      options[key] = value;
+    }
     index += 1;
   }
   return { command, options };
@@ -801,6 +836,7 @@ function usage() {
   codex-app send --conversation <id> --text <prompt> [--form <conversation-id>] [--cwd <path>] [--dry-run]
   codex-app stop --conversation <id> [--dry-run]
   codex-app watch [--conversation <id>] [--timeout <ms>]
+  codex-app profile <inspect|list|chrome-list|restart|status|restore> [options]
 
 Environment:
   CODEX_IPC_SOCKET Override automatic socket detection.
@@ -821,6 +857,22 @@ async function run(argv) {
   const { command, options } = parseArgs(argv);
   if (!command || command === 'help' || command === '--help') {
     usage();
+    return;
+  }
+
+  if (command === 'profile') {
+    const subcommand = options._[0];
+    let result = runProfileCommand(subcommand, options);
+    if (subcommand === 'restart' || subcommand === 'restore') {
+      const ipc = await waitForAppIpcReady({
+        timeoutMs: options.timeout == null
+          ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS
+          : timeoutFrom(options),
+      });
+      result = { ...result, ipcReady: true, ipc };
+    }
+    if (typeof result === 'string') process.stdout.write(`${result}\n`);
+    else printJson(result);
     return;
   }
 

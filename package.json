@@ -1,7 +1,7 @@
 {
   "name": "codex-app-cli",
   "version": "0.1.0",
-  "description": "Unofficial macOS CLI for controlling local Codex App conversations",
+  "description": "Unofficial macOS CLI for controlling Codex App conversations and isolated in-app Browser profiles",
   "private": true,
   "license": "MIT",
   "repository": {
@@ -20,15 +20,23 @@
     "codex-app": "./bin/codex-app.mjs"
   },
   "scripts": {
-    "test": "node --test"
+    "fixture": "node iab/scripts/fixture-server.mjs",
+    "test": "node --test",
+    "verify": "node bin/codex-app.mjs profile inspect"
   },
   "engines": {
     "node": ">=20"
   },
   "files": [
     "bin",
+    "docs",
+    "iab",
+    "lib",
     "APP_SESSION_RECOGNITION.md",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "dependencies": {
+    "@electron/asar": "^3.4.1"
+  }
 }

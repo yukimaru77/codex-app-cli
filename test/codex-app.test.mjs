@@ -25,6 +25,7 @@ import {
   turnStatus,
   validateRollout,
   waitForTurnCompletion,
+  waitForAppIpcReady,
 } from '../bin/codex-app.mjs';
 
 function writeRollout(directory, sessionId, records = null) {
@@ -56,6 +57,7 @@ test('CLI runs when invoked through an installed symlink', (context) => {
   const output = execFileSync(link, ['help'], { encoding: 'utf8' });
   assert.match(output, /codex-app recognize/);
   assert.match(output, /codex-app rename/);
+  assert.match(output, /codex-app profile/);
 });
 
 test('socket override must point to a Unix socket', async (context) => {
@@ -104,6 +106,28 @@ test('client initializes and sends a versioned request over IPC', async (context
   assert.equal('version' in received[0], false);
   assert.equal(received[1].sourceClientId, 'test-client');
   assert.equal(received[1].version, 1);
+});
+
+test('waits through transient profile restart IPC failures', async () => {
+  let attempts = 0;
+  const result = await waitForAppIpcReady({
+    timeoutMs: 100,
+    retryMs: 1,
+    createClient: () => ({
+      socketPath: '/tmp/test-ipc.sock',
+      clientId: 'ready-client',
+      async connect() {
+        attempts += 1;
+        if (attempts < 3) throw new Error('connect ECONNREFUSED');
+      },
+      close() {},
+    }),
+  });
+  assert.equal(attempts, 3);
+  assert.deepEqual(result, {
+    socketPath: '/tmp/test-ipc.sock',
+    clientId: 'ready-client',
+  });
 });
 
 test('builds new-thread deep-link parameters', () => {

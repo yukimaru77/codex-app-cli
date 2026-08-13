@@ -8,6 +8,7 @@ It can:
 - create an App-owned conversation and submit its first prompt;
 - send a follow-up to an existing App conversation;
 - interrupt a running turn and watch App IPC events; and
+- inspect, import, seed, and activate isolated in-app Browser profiles; and
 - import an externally created rollout, fork it into a normal App conversation, and open it.
 
 > [!WARNING]
@@ -31,7 +32,7 @@ npm link
 codex-app status
 ```
 
-There are no runtime npm dependencies.
+The package installs its runtime dependencies with `npm link` or `npm install`.
 
 ## Commands
 
@@ -48,6 +49,45 @@ There are no runtime npm dependencies.
 | `stop` | deep link + private App IPC | Interrupt the active turn. |
 | `watch` | private App IPC | Stream matching App IPC broadcasts. |
 | `recognize` | shared rollout store + `codex app-server` | Import and fork an external rollout into an App-visible conversation. |
+| `profile` | signed App inspection + in-memory runtime patch | Manage per-session in-app Browser profiles. |
+
+### Manage isolated in-app Browser profiles
+
+Profile operations are built into `codex-app`; a separate `codex-iab-profile` installation is not required.
+
+```bash
+codex-app profile inspect
+codex-app profile list
+codex-app profile chrome-list
+codex-app profile status
+```
+
+Start the signed App with per-session in-app Browser storage, using the App's current imported browser state as the seed:
+
+```bash
+codex-app profile restart --from default
+```
+
+Import a Chrome profile by its directory or unique display name. The signed App's standard importer imports Cookies and Passwords, leaves History disabled, and the result is snapshotted into a unique seed before session profiles are created.
+
+```bash
+codex-app profile chrome-list
+codex-app profile restart --from 'chrome:Profile 1'
+codex-app profile restart --from 'chrome:Work'
+```
+
+`--from` chooses the seed. To apply it to an existing Codex session, specify its ID with `--conversation`. Existing session storage is preserved unless `--replace` is explicit; replacement first creates a timestamped backup.
+
+```bash
+codex-app profile restart \
+  --from 'chrome:Profile 1' \
+  --conversation '<session-id>' \
+  --replace
+```
+
+Repeated `--thread <id>` is also accepted when preparing multiple sessions in one restart. Close Chrome before importing a Chrome profile. Return to an ordinary unpatched App launch with `codex-app profile restore`.
+
+The runtime changes only the JavaScript loaded in memory. It does not edit, copy, re-sign, or replace `/Applications/ChatGPT.app`. See [IAB architecture](./docs/IAB_ARCHITECTURE.md), [live test](./docs/IAB_LIVE_TEST.md), and [verification evidence](./docs/IAB_VERIFICATION.md).
 
 ### Inspect conversations
 
@@ -153,12 +193,13 @@ lsof -nU 2>/dev/null | grep -F "$SOCKET"
 - `send`, `stop`, `watch`, and `status` depend on private IPC method names and versions.
 - `list`, `read`, and `open` depend on the local state database and rollout layout.
 - App-provided tools, in-app Browser availability, and callback routing remain properties of the live App-created thread and the installed App build.
-- This repository does not patch, re-sign, or replace the official App.
+- The profile runtime patches the App's loaded JavaScript only in memory; it does not edit, re-sign, or replace the official App bundle.
 
 ## Development
 
 ```bash
 npm test
+npm run verify
 node --check bin/codex-app.mjs
 npm pack --dry-run
 ```
