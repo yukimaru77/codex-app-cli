@@ -559,7 +559,7 @@ function assertSuccess(response, method) {
 function parseArgs(argv) {
   const [command, ...tokens] = argv;
   const options = { _: [] };
-  const booleans = new Set(['archived', 'dry-run', 'json']);
+  const booleans = new Set(['all-item', 'archived', 'dry-run', 'json']);
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
@@ -689,6 +689,66 @@ export function transcriptMessages(records) {
   });
 }
 
+export function selectedTranscriptMessages(records, allItems = false) {
+  const messages = transcriptMessages(records);
+  return allItems ? messages : messages.slice(-1);
+}
+
+function messageTurnId(record) {
+  return record?.payload?.turn_id
+    ?? record?.payload?.internal_chat_message_metadata_passthrough?.turn_id
+    ?? null;
+}
+
+export function lastAssistantMessageForTurn(records, turnId) {
+  const messages = records.flatMap((record) => {
+    const payload = record?.payload;
+    if (record?.type !== 'response_item' || payload?.type !== 'message' || payload.role !== 'assistant') return [];
+    if (messageTurnId(record) !== turnId) return [];
+    const text = (payload.content ?? [])
+      .filter((part) => part?.type === 'output_text')
+      .map((part) => part.text ?? '')
+      .join('\n');
+    return text ? [{ timestamp: record.timestamp ?? null, role: 'assistant', text }] : [];
+  });
+  return messages.at(-1) ?? null;
+}
+
+export async function waitForTurnCompletion({
+  readRecords,
+  afterRecordCount,
+  expectedTurnId = null,
+  timeoutMs,
+  pollMs = 200,
+}) {
+  const deadline = Date.now() + timeoutMs;
+  let turnId = expectedTurnId;
+  do {
+    const records = readRecords();
+    const newRecords = records.slice(afterRecordCount);
+    if (turnId == null) {
+      turnId = newRecords.find((record) => (
+        record?.type === 'event_msg' && record?.payload?.type === 'task_started'
+      ))?.payload?.turn_id ?? null;
+    }
+    if (turnId != null) {
+      const lifecycle = newRecords.filter((record) => (
+        record?.type === 'event_msg'
+        && (record.payload.type === 'task_complete' || record.payload.type === 'turn_aborted')
+        && (record.payload.turn_id === turnId || (record.payload.type === 'turn_aborted' && record.payload.turn_id == null))
+      )).at(-1);
+      if (lifecycle?.payload?.type === 'turn_aborted') throw new Error(`turn aborted: ${turnId}`);
+      if (lifecycle?.payload?.type === 'task_complete') {
+        const message = lastAssistantMessageForTurn(records, turnId);
+        if (!message) throw new Error(`completed turn has no assistant message: ${turnId}`);
+        return { status: 'completed', turnId, completedAt: lifecycle.timestamp ?? null, message };
+      }
+    }
+    await delay(pollMs);
+  } while (Date.now() < deadline);
+  throw new Error(`turn completion timed out after ${timeoutMs}ms${turnId ? `: ${turnId}` : ''}`);
+}
+
 export function turnStatus(records) {
   let result = { status: 'idle', turnId: null, updatedAt: null };
   for (const record of records) {
@@ -734,11 +794,11 @@ function usage() {
   codex-app turn-status --conversation <id>
   codex-app rename --conversation <id> --name <name> [--dry-run]
   codex-app list [--cwd <path>] [--limit <n>] [--archived] [--json]
-  codex-app read --conversation <id> [--json]
+  codex-app read --conversation <id> [--all-item] [--json]
   codex-app recognize --rollout <jsonl> --session-id <id> --cwd <workspace> [--name <name>] [--text <first instruction>] [--dry-run]
   codex-app open --conversation <id> [--dry-run]
   codex-app new --text <prompt> [--cwd <path>] [--dry-run]
-  codex-app send --conversation <id> --text <prompt> [--cwd <path>] [--dry-run]
+  codex-app send --conversation <id> --text <prompt> [--form <conversation-id>] [--cwd <path>] [--dry-run]
   codex-app stop --conversation <id> [--dry-run]
   codex-app watch [--conversation <id>] [--timeout <ms>]
 
@@ -833,7 +893,7 @@ async function run(argv) {
     const rolloutPath = rows[0]?.rollout_path;
     if (!rolloutPath) throw new Error(`conversation not found: ${options.conversation}`);
     const records = fs.readFileSync(rolloutPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
-    const messages = transcriptMessages(records);
+    const messages = selectedTranscriptMessages(records, options['all-item']);
     if (options.json) printJson({ id: options.conversation, rolloutPath, messages });
     else for (const message of messages) process.stdout.write(`${message.role}: ${message.text}\n`);
     return;
@@ -965,12 +1025,25 @@ async function run(argv) {
 
   if (command === 'send') {
     if (!options.conversation) throw new Error('send requires --conversation <id>');
+    const relayConversation = options.form ?? options.from ?? null;
+    if (relayConversation) {
+      const rows = queryState(`SELECT id FROM threads WHERE id = ${sqlString(relayConversation)} LIMIT 1`);
+      if (rows.length === 0) throw new Error(`relay conversation not found: ${relayConversation}`);
+    }
+    const targetRows = queryState(`SELECT rollout_path FROM threads WHERE id = ${sqlString(options.conversation)} LIMIT 1`);
+    const rolloutPath = targetRows[0]?.rollout_path;
+    if (!rolloutPath) throw new Error(`conversation not found: ${options.conversation}`);
+    const readRecords = () => fs.readFileSync(rolloutPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    const beforeRecordCount = relayConversation ? readRecords().length : null;
     const params = {
       conversationId: options.conversation,
       turnStartParams: buildStartTurnParams(options),
     };
     if (options['dry-run']) {
-      printJson(requestDescription('thread-follower-start-turn', params, options));
+      printJson({
+        ...requestDescription('thread-follower-start-turn', params, options),
+        ...(relayConversation ? { relayOnCompletionTo: relayConversation } : {}),
+      });
       return;
     }
     const client = new CodexAppClient({
@@ -987,8 +1060,46 @@ async function run(argv) {
         readinessTimeoutMs: options.timeout == null ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS : timeoutFrom(options),
         requestTimeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
       });
-      printJson(response);
       assertSuccess(response, 'thread-follower-start-turn');
+      if (!relayConversation) {
+        printJson(response);
+        return;
+      }
+      const completion = await waitForTurnCompletion({
+        readRecords,
+        afterRecordCount: beforeRecordCount,
+        expectedTurnId: response?.result?.result?.turn?.id ?? response?.result?.turn?.id ?? null,
+        timeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
+      });
+      client.close();
+      openDeepLink(threadDeepLink(relayConversation));
+      await delay(750);
+      const relayClient = new CodexAppClient({
+        socketPath: options.socket ?? findSocketPath(),
+        timeoutMs: timeoutFrom(options),
+        clientType: 'codex-app-cli-relay',
+      });
+      await relayClient.connect();
+      try {
+        const relayParams = {
+          conversationId: relayConversation,
+          turnStartParams: buildStartTurnParams({ text: completion.message.text }),
+        };
+        const relayResponse = await requestWhenHandlerReady(relayClient, 'thread-follower-start-turn', relayParams, {
+          readinessTimeoutMs: options.timeout == null ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS : timeoutFrom(options),
+          requestTimeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
+        });
+        assertSuccess(relayResponse, 'thread-follower-start-turn');
+        printJson({
+          ok: true,
+          conversationId: options.conversation,
+          completion,
+          relayedTo: relayConversation,
+          relayResponse,
+        });
+      } finally {
+        relayClient.close();
+      }
     } finally {
       client.close();
     }

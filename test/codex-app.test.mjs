@@ -16,12 +16,15 @@ import {
   encodeFrame,
   findSocketPath,
   installRollout,
+  lastAssistantMessageForTurn,
   recognizeSession,
   renameThread,
   rolloutDestination,
+  selectedTranscriptMessages,
   transcriptMessages,
   turnStatus,
   validateRollout,
+  waitForTurnCompletion,
 } from '../bin/codex-app.mjs';
 
 function writeRollout(directory, sessionId, records = null) {
@@ -181,14 +184,53 @@ test('renames a thread and verifies the persisted name', async () => {
 });
 
 test('extracts user and assistant transcript messages', () => {
-  assert.deepEqual(transcriptMessages([
+  const records = [
     { type: 'event_msg', payload: { type: 'token_count' } },
     { timestamp: 'one', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hello' }] } },
     { timestamp: 'two', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'test' }] } },
-  ]), [
+  ];
+  assert.deepEqual(transcriptMessages(records), [
     { timestamp: 'one', role: 'user', text: 'hello' },
     { timestamp: 'two', role: 'assistant', text: 'test' },
   ]);
+  assert.deepEqual(selectedTranscriptMessages(records), [
+    { timestamp: 'two', role: 'assistant', text: 'test' },
+  ]);
+  assert.deepEqual(selectedTranscriptMessages(records, true), transcriptMessages(records));
+});
+
+test('waits for a matching completed turn and returns its final assistant message', async () => {
+  const records = [
+    { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'old' }], internal_chat_message_metadata_passthrough: { turn_id: 'old-turn' } } },
+    { timestamp: 'one', type: 'event_msg', payload: { type: 'task_started', turn_id: 'new-turn' } },
+    { timestamp: 'two', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'progress' }], internal_chat_message_metadata_passthrough: { turn_id: 'new-turn' } } },
+    { timestamp: 'three', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'final' }], internal_chat_message_metadata_passthrough: { turn_id: 'new-turn' } } },
+    { timestamp: 'four', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'new-turn' } },
+  ];
+  assert.equal(lastAssistantMessageForTurn(records, 'new-turn').text, 'final');
+  assert.deepEqual(await waitForTurnCompletion({ readRecords: () => records, afterRecordCount: 1, timeoutMs: 100, pollMs: 1 }), {
+    status: 'completed', turnId: 'new-turn', completedAt: 'four',
+    message: { timestamp: 'three', role: 'assistant', text: 'final' },
+  });
+});
+
+test('rejects an aborted relayed turn', async () => {
+  const records = [
+    { type: 'event_msg', payload: { type: 'task_started', turn_id: 'new-turn' } },
+    { type: 'event_msg', payload: { type: 'turn_aborted' } },
+  ];
+  await assert.rejects(waitForTurnCompletion({ readRecords: () => records, afterRecordCount: 0, timeoutMs: 100, pollMs: 1 }), /turn aborted: new-turn/);
+});
+
+test('waits for an already-running turn returned by the App IPC response', async () => {
+  const records = [
+    { type: 'event_msg', payload: { type: 'task_started', turn_id: 'active-turn' } },
+    { timestamp: 'two', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'final' }], internal_chat_message_metadata_passthrough: { turn_id: 'active-turn' } } },
+    { timestamp: 'three', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'active-turn' } },
+  ];
+  const completion = await waitForTurnCompletion({ readRecords: () => records, afterRecordCount: 1, expectedTurnId: 'active-turn', timeoutMs: 100, pollMs: 1 });
+  assert.equal(completion.turnId, 'active-turn');
+  assert.equal(completion.message.text, 'final');
 });
 
 test('validates and installs a paginated rollout without overwriting', (context) => {

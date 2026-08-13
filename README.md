@@ -55,11 +55,16 @@ There are no runtime npm dependencies.
 codex-app list --cwd "$PWD" --limit 10
 codex-app read --conversation '<thread-id>'
 codex-app read --conversation '<thread-id>' --json
+codex-app read --conversation '<thread-id>' --all-item
 codex-app turn-status --conversation '<thread-id>'
 codex-app rename --conversation '<thread-id>' --name 'New chat name'
 ```
 
 `turn-status` reports `idle`, `inProgress`, `completed`, or `aborted` from the latest lifecycle event in the rollout.
+
+`read` returns only the latest message by default. Add `--all-item` to return the full message transcript.
+
+Add `--form <session-id>` to `send` (`--from` is an alias) to wait for the target turn to complete and relay that turn's final assistant message to the specified session.
 
 ### Create and immediately run a conversation
 
