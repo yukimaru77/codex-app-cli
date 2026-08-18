@@ -1,7 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -150,31 +156,38 @@ export function restartAppWithThreadProfiles(
   if (isChromeProfileSource(seedFrom)) {
     const prepared = createChromeImportRequest(seedFrom, { chromeRoot });
     sourceProfile = prepared.request.destinationProfile;
-    openAppWithRetry(
-      spawnSyncImpl,
-      ["-n", ...buildRuntimeOpenArguments({
-        appPath,
-        preloadPath,
+    const isolation = isolateAppBrowserProfile({ partitionsPath });
+    let importEvent;
+    let snapshot;
+    try {
+      openAppWithRetry(
+        spawnSyncImpl,
+        ["-n", ...buildRuntimeOpenArguments({
+          appPath,
+          preloadPath,
+          logPath,
+          seedFrom: "codex-browser-app",
+          partitionsPath,
+          chromeImportRequest: prepared.request,
+        })],
+        { label: "Chrome profile import launch", timeoutMs },
+      );
+      importEvent = waitForChromeImportEvent(
+        prepared.request.requestId,
         logPath,
-        seedFrom: "codex-browser-app",
+        timeoutMs,
+      );
+      waitForAppProcessExit(appPath, importEvent.pid, { spawnSyncImpl, timeoutMs });
+      if (importEvent.event === "chrome-profile-import-failed") {
+        throw new Error(`Chrome profile import failed: ${importEvent.error}`);
+      }
+      snapshot = snapshotImportedChromeProfile({
+        destinationProfile: sourceProfile,
         partitionsPath,
-        chromeImportRequest: prepared.request,
-      })],
-      { label: "Chrome profile import launch", timeoutMs },
-    );
-    const importEvent = waitForChromeImportEvent(
-      prepared.request.requestId,
-      logPath,
-      timeoutMs,
-    );
-    waitForAppProcessExit(appPath, importEvent.pid, { spawnSyncImpl, timeoutMs });
-    if (importEvent.event === "chrome-profile-import-failed") {
-      throw new Error(`Chrome profile import failed: ${importEvent.error}`);
+      });
+    } finally {
+      isolation.restore();
     }
-    const snapshot = snapshotImportedChromeProfile({
-      destinationProfile: sourceProfile,
-      partitionsPath,
-    });
     if (!listBrowserProfiles(partitionsPath).includes(sourceProfile)) {
       throw new Error(`Chrome profile import did not create its seed profile: ${sourceProfile}`);
     }
@@ -216,6 +229,42 @@ export function restartAppWithThreadProfiles(
     seededProfiles,
     runtimeEvent: event,
     compatibility,
+  };
+}
+
+export function isolateAppBrowserProfile({
+  partitionsPath = defaultPartitionsPath(),
+  nonce = randomUUID(),
+} = {}) {
+  const root = path.resolve(partitionsPath);
+  const appProfilePath = path.join(root, "codex-browser-app");
+  const backupPath = path.join(root, `.codex-browser-app.chrome-import-backup-${nonce}`);
+  mkdirSync(root, { recursive: true });
+
+  let hadProfile = false;
+  try {
+    const stat = lstatSync(appProfilePath);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error("App browser profile must be a regular directory");
+    }
+    renameSync(appProfilePath, backupPath);
+    hadProfile = true;
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  mkdirSync(appProfilePath);
+
+  let restored = false;
+  return {
+    appProfilePath,
+    backupPath: hadProfile ? backupPath : null,
+    restore() {
+      if (restored) return;
+      rmSync(appProfilePath, { force: true, recursive: true });
+      if (hadProfile) renameSync(backupPath, appProfilePath);
+      else mkdirSync(appProfilePath);
+      restored = true;
+    },
   };
 }
 

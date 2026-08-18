@@ -16,12 +16,42 @@ import {
   createChromeImportRequest,
   encodeChromeImportRequest,
   findAppMainProcesses,
+  isolateAppBrowserProfile,
   openAppWithRetry,
   readRuntimeEvents,
   requestAppQuitWithFallback,
   requestAppQuitWithRetry,
   snapshotImportedChromeProfile,
 } from "../iab/lib/runtime-launcher.mjs";
+
+test("isolates and restores the fixed App profile around a Chrome import", (context) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "codex-iab-import-isolation-"));
+  context.after(() => rmSync(root, { force: true, recursive: true }));
+  const appProfile = path.join(root, "codex-browser-app");
+  mkdirSync(appProfile);
+  writeFileSync(path.join(appProfile, "Cookies"), "original-cookies");
+
+  const isolation = isolateAppBrowserProfile({ partitionsPath: root, nonce: "test" });
+  assert.equal(existsSync(path.join(isolation.backupPath, "Cookies")), true);
+  writeFileSync(path.join(appProfile, "Cookies"), "imported-cookies");
+  isolation.restore();
+
+  assert.equal(readFileSync(path.join(appProfile, "Cookies"), "utf8"), "original-cookies");
+  assert.equal(existsSync(isolation.backupPath), false);
+});
+
+test("restores the fixed App profile only once after import failure cleanup", (context) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "codex-iab-import-cleanup-"));
+  context.after(() => rmSync(root, { force: true, recursive: true }));
+  const isolation = isolateAppBrowserProfile({ partitionsPath: root, nonce: "test" });
+  writeFileSync(path.join(isolation.appProfilePath, "Cookies"), "partial-import");
+
+  isolation.restore();
+  isolation.restore();
+
+  assert.equal(existsSync(isolation.appProfilePath), true);
+  assert.equal(existsSync(path.join(isolation.appProfilePath, "Cookies")), false);
+});
 
 test("builds an in-memory runtime launch for the unmodified official app", () => {
   assert.deepEqual(buildRuntimeOpenArguments({
