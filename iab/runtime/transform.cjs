@@ -1,14 +1,14 @@
 const { rendererPatchSource } = require("./renderer-patch.cjs");
 
 const ATTACH_CALL =
-  "GB({configureBrowserSession:r,params:s,preloadPath:u,webPreferences:a})";
+  "UB({configureBrowserSession:r,params:s,preloadPath:d,webPreferences:a})";
 const ATTACH_CALL_REPLACEMENT =
-  "GB({configureBrowserSession:r,conversationId:D.conversationId,params:s,preloadPath:u,webPreferences:a})";
+  "UB({configureBrowserSession:r,conversationId:D.conversationId,params:s,preloadPath:d,webPreferences:a})";
 
 const CONFIGURE_WEBVIEW =
-  "function GB({configureBrowserSession:e,params:t,preloadPath:n,webPreferences:r}){t.partition=Qs(`app`),r.session=e(),r.preload=n,qB(t,r)}";
+  "function UB({configureBrowserSession:e,params:t,preloadPath:n,webPreferences:r}){t.partition=is(`app`),r.session=e(),r.preload=n,GB(t,r)}";
 const CONFIGURE_WEBVIEW_REPLACEMENT =
-  "function GB({configureBrowserSession:e,conversationId:o,params:t,preloadPath:n,webPreferences:r}){t.partition=Qs(o),r.session=e(o),r.preload=n,qB(t,r)}";
+  "function UB({configureBrowserSession:e,conversationId:o,params:t,preloadPath:n,webPreferences:r}){t.partition=is(o),r.session=e(o),r.preload=n,GB(t,r)}";
 
 const CONFIGURE_SESSION_CALLBACK =
   "configureBrowserSession:()=>this.browserSessionService.configure(),";
@@ -16,19 +16,19 @@ const CONFIGURE_SESSION_CALLBACK_REPLACEMENT =
   "configureBrowserSession:e=>this.browserSessionService.configure(e),";
 
 const ROUTE_PARSER_PREFIX =
-  "function PB(e){let t=e[MB]??e[`data-conversation-id`]??null,n=e[NB]??null;";
+  "function MB(e){let t=e[AB]??e[`data-conversation-id`]??null,n=e[jB]??null;";
 const ROUTE_PARSER_PREFIX_REPLACEMENT =
-  "function PB(e){let c=e.src,m=`#codex-iab-thread-profile:`,d=typeof c==`string`?c.indexOf(m):-1;if(d>=0)try{let[t,n]=decodeURIComponent(c.slice(d+m.length)).split(`\\0`);if(t?.length>0&&n?.length>0)return{browserTabId:se(n),conversationId:t}}catch{}let t=e[MB]??e[`data-conversation-id`]??null,n=e[NB]??null;";
+  "function MB(e){let c=e.src,m=`#codex-iab-thread-profile:`,d=typeof c==`string`?c.indexOf(m):-1;if(d>=0)try{let[t,n]=decodeURIComponent(c.slice(d+m.length)).split(`\\0`);if(t?.length>0&&n?.length>0)return{browserTabId:ue(n),conversationId:t}}catch{}let t=e[AB]??e[`data-conversation-id`]??null,n=e[jB]??null;";
 
 const REGISTERED_ROUTE_LOOKUP =
-  "let h=IB(s.partition),g=h==null?null:f.registeredWebviewHostsByRoutePartition.get(h)??null,_=PB(s),v=FB(s),";
+  "let h=PB(s.partition),g=h==null?null:p.registeredWebviewHostsByRoutePartition.get(h)??null,_=MB(s),v=NB(s),";
 const REGISTERED_ROUTE_LOOKUP_REPLACEMENT =
-  "let _=PB(s),h=_==null?IB(s.partition):Le(_.conversationId,_.browserTabId),g=h==null?null:f.registeredWebviewHostsByRoutePartition.get(h)??null,v=FB(s),";
+  "let _=MB(s),h=_==null?PB(s.partition):Ve(_.conversationId,_.browserTabId),g=h==null?null:p.registeredWebviewHostsByRoutePartition.get(h)??null,v=NB(s),";
 
 const SESSION_SERVICE_PREFIX =
-  "var mV=class{options;configured=!1;constructor(e){this.options=e}configure(){let e=l.session.fromPartition(Qs(`app`));return this.configured?e:";
+  "var fV=class{options;configured=!1;constructor(e){this.options=e}configure(){let e=l.session.fromPartition(is(`app`));return this.configured?e:";
 const SESSION_SERVICE_PREFIX_REPLACEMENT =
-  "var mV=class{options;configured=new Set;constructor(e){this.options=e}configure(t=`app`){let e=(globalThis.__codexIabSeedProfile?.(Qs(t)),l.session.fromPartition(Qs(t)));return this.configured.has(t)?e:";
+  "var fV=class{options;configured=new Set;constructor(e){this.options=e}configure(t=`app`){let e=(globalThis.__codexIabSeedProfile?.(is(t)),l.session.fromPartition(is(t)));return this.configured.has(t)?e:";
 
 const SESSION_SERVICE_SUFFIX =
   "}),this.configured=!0,e)}async clearBrowsingData";
@@ -36,9 +36,9 @@ const SESSION_SERVICE_SUFFIX_REPLACEMENT =
   "}),this.configured.add(t),e)}async clearBrowsingData";
 
 const HOST_METADATA_PREFIX =
-  "function FB(e){let t=e.partition;if(typeof t!=`string`)return null;";
+  "function NB(e){let t=e.partition;if(typeof t!=`string`)return null;";
 const HOST_METADATA_PREFIX_REPLACEMENT =
-  "function FB(e){let u=e.src,m=`#codex-iab-thread-profile:`,d=typeof u==`string`?u.indexOf(m):-1;if(d>=0)try{let[,,c,l]=decodeURIComponent(u.slice(d+m.length)).split(`\\0`),h=Number(l);if(c?.length>0&&Number.isInteger(h)&&h>0)return{hostGeneration:h,rendererInstanceId:c}}catch{}let c=e[`data-codex-iab-renderer-instance-id`],l=Number(e[`data-codex-iab-host-generation`]);if(typeof c==`string`&&c.length>0&&Number.isInteger(l)&&l>0)return{hostGeneration:l,rendererInstanceId:c};let t=e.partition;if(typeof t!=`string`)return null;";
+  "function NB(e){let u=e.src,m=`#codex-iab-thread-profile:`,d=typeof u==`string`?u.indexOf(m):-1;if(d>=0)try{let[,,c,l]=decodeURIComponent(u.slice(d+m.length)).split(`\\0`),h=Number(l);if(c?.length>0&&Number.isInteger(h)&&h>0)return{hostGeneration:h,rendererInstanceId:c}}catch{}let c=e[`data-codex-iab-renderer-instance-id`],l=Number(e[`data-codex-iab-host-generation`]);if(typeof c==`string`&&c.length>0&&Number.isInteger(l)&&l>0)return{hostGeneration:l,rendererInstanceId:c};let t=e.partition;if(typeof t!=`string`)return null;";
 
 const ELECTRON_IMPORT_SUFFIX =
   "l=e.o(l);let d=require(\"node:os\")";
