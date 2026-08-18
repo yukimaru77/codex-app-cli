@@ -24,6 +24,7 @@ import {
   isChromeProfileSource,
   resolveChromeProfile,
 } from "./chrome-profile.mjs";
+import { exportSupplementalChromeCookies } from "./chrome-cookies.mjs";
 import {
   defaultPartitionsPath,
   listBrowserProfiles,
@@ -156,10 +157,15 @@ export function restartAppWithThreadProfiles(
   if (isChromeProfileSource(seedFrom)) {
     const prepared = createChromeImportRequest(seedFrom, { chromeRoot });
     sourceProfile = prepared.request.destinationProfile;
-    const isolation = isolateAppBrowserProfile({ partitionsPath });
+    const supplementalCookies = exportSupplementalChromeCookies(prepared.profile.profilePath, {
+      spawnSyncImpl,
+    });
+    prepared.request.cookieFile = supplementalCookies.filePath;
+    let isolation;
     let importEvent;
     let snapshot;
     try {
+      isolation = isolateAppBrowserProfile({ partitionsPath });
       openAppWithRetry(
         spawnSyncImpl,
         ["-n", ...buildRuntimeOpenArguments({
@@ -186,7 +192,8 @@ export function restartAppWithThreadProfiles(
         partitionsPath,
       });
     } finally {
-      isolation.restore();
+      supplementalCookies.cleanup();
+      isolation?.restore();
     }
     if (!listBrowserProfiles(partitionsPath).includes(sourceProfile)) {
       throw new Error(`Chrome profile import did not create its seed profile: ${sourceProfile}`);
@@ -198,6 +205,11 @@ export function restartAppWithThreadProfiles(
       profile: sourceProfile,
       snapshot,
       result: importEvent.result,
+      supplementalCookies: {
+        exported: supplementalCookies.count,
+        skippedPartitioned: supplementalCookies.skippedPartitioned,
+        skippedExpired: supplementalCookies.skippedExpired,
+      },
     };
   } else {
     sourceProfile = resolveBrowserProfileName(seedFrom);

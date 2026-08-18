@@ -47,9 +47,11 @@ session.fromPartition(`persist:codex-browser-${encodeURIComponent(routeKey)}`)
 
 `restart --from <profile>` は別の既存partitionをseedに選択します。既に空profileが生成されたthreadには、Appを正常終了してから `--thread <id> --replace` で事前コピーできます。この経路ではChromiumのSQLite・LevelDBを稼働中に置換しません。
 
-`restart --from chrome:<directory-or-display-name>` はApp bundle内の独自実装を再現せず、署名済みAppがElectron sessionへ公開している `browserProfileImporter` を呼びます。現行Appの標準importerは呼び出し元sessionにかかわらず固定の `persist:codex-browser-app` を更新するため、import専用App processの終了を待ってから、そのdirectoryを一意な `codex-browser-chrome-import-<uuid>` seedへsnapshotします。通常runtimeはこのsnapshotだけを参照し、新規threadのpartitionを作ります。
+`restart --from chrome:<directory-or-display-name>` は署名済みAppがElectron sessionへ公開している `browserProfileImporter` を呼びます。標準importerが取りこぼす非partitioned Cookieは、CLIがChrome Safe Storageの鍵で復号し、mode `0600` の一時ファイルを介してimport専用processへ渡します。import専用processはElectronの `cookies.set` で再暗号化して保存し、一時ファイルを直ちに削除します。Cookie値をコマンド引数・環境変数・runtime logへ出力しません。partitioned CookieはElectron公開APIで設定できないため標準importerへ委ねます。
 
-Chrome profileの選択にはChromeの `Local State` にあるdirectory名と表示名だけを使い、CookieやPassword DBをCLI自身では読み取り・復号しません。import指定は標準UIと同じCookie/Password有効、History無効です。`--thread <id>` がある場合はsnapshotから指定sessionのprofileも事前作成し、既存profileは `--replace` なしでは上書きしません。
+現行Appの標準importerは呼び出し元sessionにかかわらず固定の `persist:codex-browser-app` を更新するため、import中は既存の固定profileを退避します。import専用App processの終了後にそのdirectoryを一意な `codex-browser-chrome-import-<uuid>` seedへsnapshotし、元の固定profileを復元します。通常runtimeはこのsnapshotだけを参照し、新規threadのpartitionを作ります。補完Cookieの復号・再保存が1件でも失敗した場合はimport全体を失敗扱いにし、途中状態をseed化しません。
+
+Chrome profileの選択にはChromeの `Local State` にあるdirectory名と表示名を使います。Cookie DBは上記の補完処理に限ってCLIが読み取り・復号しますが、Password DBはCLI自身で読み取り・復号しません。標準importerの指定はCookie/Password有効、History無効です。`--thread <id>` がある場合はsnapshotから指定sessionのprofileも事前作成し、既存profileは `--replace` なしでは上書きしません。
 
 既存のthread partitionは既定で再利用します。`--replace` を明示した場合も旧ディレクトリを削除せず、`.backup-<timestamp>` へrenameしてから新しいコピーを作成します。profile名はPartitionsディレクトリ直下の `codex-browser-*` のみに制限し、任意pathやsymlinkは受け付けません。
 

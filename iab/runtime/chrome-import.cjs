@@ -1,4 +1,5 @@
 const path = require("node:path");
+const fs = require("node:fs");
 
 const IMPORT_PROFILE_PATTERN = /^codex-browser-chrome-import-[0-9a-f-]{36}$/i;
 
@@ -24,11 +25,28 @@ function decodeChromeImportRequest(encoded) {
   ) {
     throw new Error("Chrome import request has an invalid destinationProfile");
   }
+  if (typeof request.cookieFile !== "string" || !path.isAbsolute(request.cookieFile)) {
+    throw new Error("Chrome import request requires an absolute cookieFile");
+  }
   return {
     requestId: request.requestId,
     profilePath: path.resolve(request.profilePath),
     destinationProfile: request.destinationProfile,
+    cookieFile: path.resolve(request.cookieFile),
   };
+}
+
+function readSupplementalCookies(cookieFile) {
+  let payload;
+  try {
+    payload = JSON.parse(fs.readFileSync(cookieFile, "utf8"));
+  } finally {
+    fs.rmSync(cookieFile, { force: true });
+  }
+  if (payload == null || typeof payload !== "object" || !Array.isArray(payload.cookies)) {
+    throw new Error("supplemental Chrome cookie file is invalid");
+  }
+  return payload;
 }
 
 async function importChromeProfile({ electron, request, log }) {
@@ -57,6 +75,16 @@ async function importChromeProfile({ electron, request, log }) {
     importPasswords: true,
     importHistory: false,
   });
+  const supplemental = readSupplementalCookies(request.cookieFile);
+  if (appBrowserSession.cookies == null || typeof appBrowserSession.cookies.set !== "function") {
+    throw new Error("Installed Codex App does not expose Electron cookie storage");
+  }
+  for (const cookie of supplemental.cookies) {
+    await appBrowserSession.cookies.set(cookie);
+  }
+  if (typeof appBrowserSession.cookies.flushStore === "function") {
+    await appBrowserSession.cookies.flushStore();
+  }
   if (typeof appBrowserSession.flushStorageData === "function") {
     await appBrowserSession.flushStorageData();
   }
@@ -66,9 +94,23 @@ async function importChromeProfile({ electron, request, log }) {
     destinationProfile: request.destinationProfile,
     source: "chrome",
     sourceProfileDirectory: selected.profileDirectoryName,
-    result,
+    result: {
+      ...result,
+      supplementalCookies: {
+        imported: supplemental.cookies.length,
+        skippedPartitioned: supplemental.skippedPartitioned ?? 0,
+        skippedExpired: supplemental.skippedExpired ?? 0,
+      },
+    },
   });
-  return result;
+  return {
+    ...result,
+    supplementalCookies: {
+      imported: supplemental.cookies.length,
+      skippedPartitioned: supplemental.skippedPartitioned ?? 0,
+      skippedExpired: supplemental.skippedExpired ?? 0,
+    },
+  };
 }
 
 function installChromeProfileImport({ electron, encodedRequest, log }) {
