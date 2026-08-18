@@ -68,7 +68,7 @@ Start the signed App with per-session in-app Browser storage, using the App's cu
 codex-app profile restart --from default
 ```
 
-Import a Chrome profile by its directory or unique display name. The signed App's standard importer imports Cookies and Passwords, leaves History disabled, and the result is snapshotted into a unique seed before session profiles are created.
+Import a Chrome profile by its directory or unique display name. The signed App's standard importer imports Cookies and Passwords and leaves History disabled. The CLI supplements current non-partitioned Cookies that the standard importer omits, then snapshots the result into a unique seed before session profiles are created.
 
 ```bash
 codex-app profile chrome-list
@@ -87,7 +87,7 @@ codex-app profile restart \
 
 Repeated `--thread <id>` is also accepted when preparing multiple sessions in one restart. Close Chrome before importing a Chrome profile. Return to an ordinary unpatched App launch with `codex-app profile restore`.
 
-The runtime changes only the JavaScript loaded in memory. It does not edit, copy, re-sign, or replace `/Applications/ChatGPT.app`. See [IAB architecture](./docs/IAB_ARCHITECTURE.md), [live test](./docs/IAB_LIVE_TEST.md), and [verification evidence](./docs/IAB_VERIFICATION.md).
+The runtime changes only the JavaScript loaded in memory. It does not edit, copy, re-sign, or replace `/Applications/ChatGPT.app`. See [IAB architecture](./docs/IAB_ARCHITECTURE.md), [live test](./docs/IAB_LIVE_TEST.md), [verification evidence](./docs/IAB_VERIFICATION.md), and the [2026-08-18 Chrome session import incident report](./docs/INCIDENT_2026-08-18_CHROME_SESSION_IMPORT.md).
 
 ### Inspect conversations
 

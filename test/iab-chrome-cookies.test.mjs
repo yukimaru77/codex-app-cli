@@ -54,6 +54,21 @@ test("decrypts v24 host-bound Chrome cookies and maps Electron details", () => {
   });
 });
 
+test("rejects a v24 cookie whose encrypted host binding does not match", () => {
+  assert.throws(
+    () => buildSupplementalChromeCookies({
+      rows: [{
+        ...BASE_ROW,
+        hostKey: ".other.example",
+        encryptedValueHex: encryptCookie("opaque-session-value", BASE_ROW.hostKey),
+      }],
+      databaseVersion: 24,
+      password: PASSWORD,
+    }),
+    /host binding did not match/,
+  );
+});
+
 test("skips partitioned and expired cookies without weakening their semantics", () => {
   const encryptedValueHex = encryptCookie("value", BASE_ROW.hostKey);
   const result = buildSupplementalChromeCookies({
