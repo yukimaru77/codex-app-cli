@@ -1,5 +1,40 @@
 # 2026-08-18 Codex App更新後のIAB起動・Chrome認証移行障害
 
+## 2026-08-19: App 26.814での再発と対応
+
+Codex App `26.814.41407`（build `6720`）への更新後、`profile inspect` が9個の
+patch pointのうち7個を0件として検出し、runtime起動を停止した。main bundleは
+`.vite/build/main-BIHCWhv-.js` から `.vite/build/main-DkjTIhil.js` へ変わり、IAB周辺の
+minify済み識別子と処理構造も変化していた。
+
+既存の意味上の差し替え範囲は増やさず、現行bundleに対する完全一致文字列だけを更新した。
+更新後の再発検知結果は次のとおり。
+
+```text
+$ npm test
+tests 67
+pass 67
+fail 0
+
+$ npm run verify
+compatible: true
+mainBundle: .vite/build/main-DkjTIhil.js
+patch point occurrences: 1 x 9
+
+$ codex-app profile restart --from 'chrome:Profile 11'
+status: running
+chrome profile: AI用 (Profile 11)
+IPC ready: true
+signed App modified: false
+```
+
+**事実:** fail-closedにより不明なbundleへ旧patchが部分適用されることはなく、更新後も
+9箇所すべてが1件だけ一致することを自動テストと実App inspectionで確認した。Chrome
+importはCookie 111件を検出し、標準import 111件・補完import 106件とも失敗0件で完了した。
+
+**未検証:** この時点では、importした認証状態を使う実サイト到達と複数session間のstorage
+分離はまだ再実行していない。runtime互換性とimport成功だけをE2E合格とは扱わない。
+
 ## 概要
 
 Codex App `26.810.52044` への更新後、`codex-app` で起動したin-app Browser（IAB）が正常に使えず、Chrome profileをimportしてもGoogleや社内Webアプリで再ログインを要求される状態になった。
