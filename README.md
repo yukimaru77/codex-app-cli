@@ -139,13 +139,15 @@ codex-app new --cwd "$PWD" --text 'Hello' --profile default --dry-run
 codex-app send \
   --conversation '<thread-id>' \
   --cwd "$PWD" \
+  --model 'gpt-5.6-luna' \
+  --reasoning-effort max \
   --text 'Add a regression test as well.'
 
 codex-app stop --conversation '<thread-id>'
 codex-app watch --conversation '<thread-id>'
 ```
 
-`send` and `stop` first open the target thread so that the live Desktop handler owns it, then call `thread-follower-start-turn` or `thread-follower-interrupt-turn` over IPC. Add `--dry-run` to print the request without sending it.
+When `--model` or `--reasoning-effort` is specified, `send` first updates the conversation's thread settings and then starts the turn. This makes the selection visible in the App and preserves it for subsequent turns. `send` and `stop` first open the target thread so that the live Desktop handler owns it, then use private App IPC. Add `--dry-run` to print the request without sending it.
 
 ### Import an external rollout
 

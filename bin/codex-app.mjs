@@ -20,6 +20,7 @@ const DEFAULT_BOOTSTRAP_TEXT = 'Use the imported conversation context when answe
 const VERSION_BY_METHOD = new Map([
   ['thread-owner-discovery', 1],
   ['thread-follower-start-turn', 1],
+  ['thread-follower-update-thread-settings', 1],
   ['thread-follower-load-complete-history', 1],
   ['thread-follower-interrupt-turn', 4],
 ]);
@@ -721,6 +722,13 @@ export function buildStartTurnParams(options) {
   return params;
 }
 
+export function buildThreadSettings(options) {
+  const settings = {};
+  if (options.model) settings.model = options.model;
+  if (options['reasoning-effort']) settings.effort = options['reasoning-effort'];
+  return Object.keys(settings).length === 0 ? null : settings;
+}
+
 function printJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -924,7 +932,7 @@ function usage() {
   codex-app recognize --rollout <jsonl> --session-id <id> --cwd <workspace> [--name <name>] [--text <first instruction>] [--dry-run]
   codex-app open --conversation <id> [--dry-run]
   codex-app new --text <prompt> [--cwd <path>] [--profile <profile>] [--dry-run]
-  codex-app send --conversation <id> --text <prompt> [--form <conversation-id>] [--cwd <path>] [--dry-run]
+  codex-app send --conversation <id> --text <prompt> [--model <model>] [--reasoning-effort <effort>] [--form <conversation-id>] [--cwd <path>] [--dry-run]
   codex-app stop --conversation <id> [--dry-run]
   codex-app watch [--conversation <id>] [--timeout <ms>]
   codex-app profile <inspect|list|chrome-list|restart|status|restore> [options]
@@ -1232,9 +1240,16 @@ async function run(argv) {
       conversationId: options.conversation,
       turnStartParams: buildStartTurnParams(options),
     };
+    const threadSettings = buildThreadSettings(options);
     if (options['dry-run']) {
       printJson({
         ...requestDescription('thread-follower-start-turn', params, options),
+        ...(threadSettings ? {
+          before: requestDescription('thread-follower-update-thread-settings', {
+            conversationId: options.conversation,
+            threadSettings,
+          }, options),
+        } : {}),
         ...(relayConversation ? { relayOnCompletionTo: relayConversation } : {}),
       });
       return;
@@ -1248,6 +1263,19 @@ async function run(argv) {
     await delay(750);
     await client.connect();
     try {
+      let appliedThreadSettings = null;
+      if (threadSettings) {
+        const settingsResponse = await requestWhenHandlerReady(client, 'thread-follower-update-thread-settings', {
+          conversationId: options.conversation,
+          threadSettings,
+        }, {
+          targetClientId: options['target-client'],
+          readinessTimeoutMs: options.timeout == null ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS : timeoutFrom(options),
+          requestTimeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
+        });
+        assertSuccess(settingsResponse, 'thread-follower-update-thread-settings');
+        appliedThreadSettings = threadSettings;
+      }
       const response = await requestWhenHandlerReady(client, 'thread-follower-start-turn', params, {
         targetClientId: options['target-client'],
         readinessTimeoutMs: options.timeout == null ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS : timeoutFrom(options),
@@ -1255,7 +1283,10 @@ async function run(argv) {
       });
       assertSuccess(response, 'thread-follower-start-turn');
       if (!relayConversation) {
-        printJson(response);
+        printJson({
+          ...response,
+          ...(appliedThreadSettings ? { appliedThreadSettings } : {}),
+        });
         return;
       }
       const completion = await waitForTurnCompletion({

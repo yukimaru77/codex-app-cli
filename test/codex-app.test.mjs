@@ -14,6 +14,7 @@ import {
   activateProfileForNewConversation,
   buildNewThreadParams,
   buildStartTurnParams,
+  buildThreadSettings,
   encodeFrame,
   finalizeProfileForNewConversation,
   findSocketPath,
@@ -282,6 +283,17 @@ test('builds follow-up turn parameters', () => {
 test('generates one idempotency key for each follow-up turn request', () => {
   const params = buildStartTurnParams({ text: 'send once' });
   assert.match(params.clientUserMessageId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+});
+
+test('builds persistent thread settings for model and reasoning overrides', () => {
+  assert.deepEqual(buildThreadSettings({
+    model: 'gpt-5.6-luna',
+    'reasoning-effort': 'max',
+  }), {
+    model: 'gpt-5.6-luna',
+    effort: 'max',
+  });
+  assert.equal(buildThreadSettings({ text: 'no override' }), null);
 });
 
 test('reports the latest turn lifecycle status', () => {
