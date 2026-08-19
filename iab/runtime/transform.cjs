@@ -45,6 +45,10 @@ const ELECTRON_IMPORT_SUFFIX =
 const ELECTRON_IMPORT_SUFFIX_REPLACEMENT =
   `l=e.o(l);globalThis.__codexIabInstallChromeProfileImport?.(l);l.app.on(\`web-contents-created\`,(e,t)=>{globalThis.__codexInstallRendererSettingsPatch?.(t);t.on(\`dom-ready\`,()=>{t.executeJavaScript(${JSON.stringify(rendererPatchSource())},!0).then(e=>{e&&globalThis.__codexIabRuntimeLog?.({event:\`renderer-partition-hook-installed\`,webContentsId:t.id})}).catch(e=>{globalThis.__codexIabRuntimeLog?.({event:\`renderer-partition-hook-failed\`,error:e instanceof Error?e.message:String(e),webContentsId:t.id})})})});let d=require(\"node:os\")`;
 
+const FOLLOWER_SETTINGS_FORWARD = "async function fce(e,t,n,r){let i=";
+const FOLLOWER_SETTINGS_FORWARD_REPLACEMENT =
+  "async function fce(e,t,n,r){if(n.method===`thread-follower-update-thread-settings`){let e=JSON.stringify(`codex-app-cli-thread-settings:${n.params.conversationId}`),t=JSON.stringify(JSON.stringify(n.params.threadSettings)),r=`try{localStorage.setItem(${e},${t})}catch{}`;await Promise.allSettled(require(`electron`).webContents.getAllWebContents().map(e=>e.executeJavaScript(r,!0)))}let i=";
+
 const PATCHES = [
   [ATTACH_CALL, ATTACH_CALL_REPLACEMENT, "thread route passed to browser session"],
   [CONFIGURE_WEBVIEW, CONFIGURE_WEBVIEW_REPLACEMENT, "thread partition assigned to webview"],
@@ -82,22 +86,33 @@ function inspectMainBundle(source) {
 
 function transformMainBundle(source) {
   const inspection = inspectMainBundle(source);
-  if (!inspection.isTargetBundle) {
+  const followerSettingsOccurrences = countOccurrences(source, FOLLOWER_SETTINGS_FORWARD);
+  if (!inspection.isTargetBundle && followerSettingsOccurrences === 0) {
     return { changed: false, inspection, source };
   }
 
-  const invalid = inspection.patches.filter((patch) => patch.occurrences !== 1);
-  if (invalid.length > 0) {
+  const invalid = inspection.isTargetBundle
+    ? inspection.patches.filter((patch) => patch.occurrences !== 1)
+    : [];
+  if (invalid.length > 0 || followerSettingsOccurrences > 1) {
     throw new Error(
       `Codex IAB runtime patch does not match this App build: ${invalid
         .map((patch) => `${patch.description}=${patch.occurrences}`)
+        .concat(followerSettingsOccurrences > 1
+          ? [`thread settings persisted in app renderers=${followerSettingsOccurrences}`]
+          : [])
         .join(", ")}`,
     );
   }
 
   let transformed = source;
-  for (const [needle, replacement] of PATCHES) {
-    transformed = transformed.replace(needle, replacement);
+  if (inspection.isTargetBundle) {
+    for (const [needle, replacement] of PATCHES) {
+      transformed = transformed.replace(needle, replacement);
+    }
+  }
+  if (followerSettingsOccurrences === 1) {
+    transformed = transformed.replace(FOLLOWER_SETTINGS_FORWARD, FOLLOWER_SETTINGS_FORWARD_REPLACEMENT);
   }
   return { changed: true, inspection, source: transformed };
 }

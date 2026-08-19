@@ -67,7 +67,14 @@ test("installed App main bundle matches the runtime patch", () => {
 test("installed App renderer bundle matches the settings patch", () => {
   const asarPath = appAsarPath("/Applications/ChatGPT.app");
   const source = extractText(asarPath, findRendererBundle(asarPath));
-  assert.deepEqual(transformRendererBundle(source).occurrences, [1, 1, 1]);
+  assert.deepEqual(transformRendererBundle(source).occurrences, [1, 1, 1, 1]);
+});
+
+test("persists forwarded thread settings from the auxiliary main-process chunk", () => {
+  const result = transformMainBundle("async function fce(e,t,n,r){let i=0}");
+  assert.equal(result.changed, true);
+  assert.match(result.source, /codex-app-cli-thread-settings/);
+  assert.match(result.source, /webContents\.getAllWebContents/);
 });
 
 test("renderer hook replaces route metadata with a stable per-thread partition", () => {

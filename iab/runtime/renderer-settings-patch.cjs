@@ -4,7 +4,11 @@ const SETTINGS_GUARDS = [
 ];
 const SETTINGS_METHOD_PREFIX = "async updateThreadSettingsForNextTurn(e,t){let n=";
 const SETTINGS_METHOD_PREFIX_REPLACEMENT =
-  "async updateThreadSettingsForNextTurn(e,t){this.updateConversationState(e,e=>{Ksn(e,t)});let n=";
+  "async updateThreadSettingsForNextTurn(e,t){try{localStorage.setItem(`codex-app-cli-thread-settings:${e}`,JSON.stringify(t))}catch{}this.updateConversationState(e,e=>{Ksn(e,t)});let n=";
+const COMPOSER_SETTINGS_SOURCE =
+  "let v=OOc(_),{modelSettings:y,selectComposerModelAndReasoningEffort:b,setModelAndReasoningEffort:x}=v,S;";
+const COMPOSER_SETTINGS_REPLACEMENT =
+  "let v=OOc(_),{modelSettings:y,selectComposerModelAndReasoningEffort:b,setModelAndReasoningEffort:x}=v,S;y=(()=>{try{let e=JSON.parse(localStorage.getItem(`codex-app-cli-thread-settings:${n}`)),t=e?.effort===`max`?`xhigh`:e?.effort;return e?{...y,model:e.model??y.model,reasoningEffort:t??y.reasoningEffort}:y}catch{return y}})();";
 
 function countOccurrences(source, needle) {
   return source.split(needle).length - 1;
@@ -14,6 +18,7 @@ function transformRendererBundle(source) {
   const occurrences = [
     countOccurrences(source, SETTINGS_METHOD_PREFIX),
     ...SETTINGS_GUARDS.map((needle) => countOccurrences(source, needle)),
+    countOccurrences(source, COMPOSER_SETTINGS_SOURCE),
   ];
   if (occurrences.some((count) => count !== 1)) {
     throw new Error(
@@ -28,6 +33,10 @@ function transformRendererBundle(source) {
     const replacement = needle.slice(needle.indexOf("this.updateConversationState"));
     transformed = transformed.replace(needle, replacement);
   }
+  transformed = transformed.replace(
+    COMPOSER_SETTINGS_SOURCE,
+    COMPOSER_SETTINGS_REPLACEMENT,
+  );
   return { source: transformed, occurrences };
 }
 

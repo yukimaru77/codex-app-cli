@@ -7,6 +7,7 @@ const { transformMainBundle } = require("./transform.cjs");
 const { createProfileSeeder } = require("./profile-seed.cjs");
 const { installChromeProfileImport } = require("./chrome-import.cjs");
 const { installRendererSettingsPatch } = require("./renderer-settings-patch.cjs");
+const { RUNTIME_PATCH_VERSION } = require("./version.cjs");
 
 const logPath =
   process.env.CODEX_IAB_RUNTIME_LOG ||
@@ -35,6 +36,7 @@ Module.prototype._compile = function compileWithThreadProfiles(source, filename)
         event: "main-bundle-patched-in-memory",
         filename,
         sourceSha256,
+        runtimePatchVersion: RUNTIME_PATCH_VERSION,
       });
       source = result.source;
     }

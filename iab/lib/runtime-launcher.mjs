@@ -37,6 +37,7 @@ const require = createRequire(import.meta.url);
 const { inspectMainBundle } = require("../runtime/transform.cjs");
 const { transformRendererBundle } = require("../runtime/renderer-settings-patch.cjs");
 const { createProfileSeeder } = require("../runtime/profile-seed.cjs");
+export const { RUNTIME_PATCH_VERSION } = require("../runtime/version.cjs");
 
 export function defaultRuntimePreloadPath() {
   return path.resolve(import.meta.dirname, "..", "runtime", "preload.cjs");
