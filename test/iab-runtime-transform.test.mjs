@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
-import { appAsarPath, extractText, findMainBundle } from "../iab/lib/app-inspection.mjs";
+import { appAsarPath, extractText, findMainBundle, findRendererBundle } from "../iab/lib/app-inspection.mjs";
 
 const require = createRequire(import.meta.url);
 const { inspectMainBundle, transformMainBundle } = require("../iab/runtime/transform.cjs");
 const { rendererPatchSource } = require("../iab/runtime/renderer-patch.cjs");
+const { transformRendererBundle } = require("../iab/runtime/renderer-settings-patch.cjs");
 
 const fixture = [
   "persist:codex-browser- browser-sidebar-manager IAB_LIFECYCLE ",
@@ -61,6 +62,12 @@ test("installed App main bundle matches the runtime patch", () => {
     [1, 1, 1, 1, 1, 1, 1, 1, 1],
   );
   assert.equal(transformMainBundle(source).changed, true);
+});
+
+test("installed App renderer bundle matches the settings patch", () => {
+  const asarPath = appAsarPath("/Applications/ChatGPT.app");
+  const source = extractText(asarPath, findRendererBundle(asarPath));
+  assert.deepEqual(transformRendererBundle(source).occurrences, [1, 1, 1]);
 });
 
 test("renderer hook replaces route metadata with a stable per-thread partition", () => {

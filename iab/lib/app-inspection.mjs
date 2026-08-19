@@ -15,6 +15,16 @@ export function findMainBundle(asarPath) {
   return candidates[0];
 }
 
+export function findRendererBundle(asarPath) {
+  const candidates = listPackage(asarPath)
+    .map((entry) => entry.replace(/^\//, ""))
+    .filter((entry) => /^webview\/assets\/app-initial-[A-Za-z0-9_-]+\.js$/.test(entry));
+  if (candidates.length !== 1) {
+    throw new Error(`Expected one renderer bundle, found ${candidates.length}`);
+  }
+  return candidates[0];
+}
+
 export function defaultAppPath() {
   return "/Applications/ChatGPT.app";
 }

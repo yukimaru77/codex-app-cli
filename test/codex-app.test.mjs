@@ -15,7 +15,9 @@ import {
   buildNewThreadParams,
   buildStartTurnParams,
   buildThreadSettings,
+  createSession,
   encodeFrame,
+  ensureSettingsRuntime,
   finalizeProfileForNewConversation,
   findSocketPath,
   installRollout,
@@ -157,6 +159,30 @@ test('activates the requested profile before creating a new conversation', async
   assert.equal(result.runtime.seedProfile, 'codex-browser-chrome-import-seed');
 });
 
+test('reuses an active settings runtime when no profile override is requested', async () => {
+  let activations = 0;
+  const result = await ensureSettingsRuntime(null, {
+    status: () => ({ runtimeActive: true, pids: [123] }),
+    activate: async () => { activations += 1; },
+  });
+  assert.equal(activations, 0);
+  assert.equal(result.restarted, false);
+});
+
+test('starts the settings runtime with the requested profile when needed', async () => {
+  const profiles = [];
+  const result = await ensureSettingsRuntime('chrome:Profile 11', {
+    status: () => ({ runtimeActive: false }),
+    activate: async (profile) => {
+      profiles.push(profile);
+      return { from: profile, runtime: { seedProfile: 'imported-profile' } };
+    },
+  });
+  assert.deepEqual(profiles, ['chrome:Profile 11']);
+  assert.equal(result.restarted, true);
+  assert.equal(result.runtime.seedProfile, 'imported-profile');
+});
+
 test('new profile dry-run describes profile assignment without restarting the App', () => {
   const output = execFileSync(
     process.execPath,
@@ -292,6 +318,14 @@ test('builds persistent thread settings for model and reasoning overrides', () =
   }), {
     model: 'gpt-5.6-luna',
     effort: 'max',
+    collaborationMode: {
+      mode: 'default',
+      settings: {
+        model: 'gpt-5.6-luna',
+        reasoning_effort: 'max',
+        developer_instructions: null,
+      },
+    },
   });
   assert.equal(buildThreadSettings({ text: 'no override' }), null);
 });
@@ -478,6 +512,8 @@ test('forks, bootstraps, sends a separate initial turn, names, and verifies the 
     name: 'Imported project context',
     bootstrapText: 'bootstrap',
     initialText: 'first instruction',
+    model: 'gpt-5.6-luna',
+    reasoningEffort: 'max',
     timeoutMs: 1_000,
     client,
   });
@@ -497,9 +533,75 @@ test('forks, bootstraps, sends a separate initial turn, names, and verifies the 
     sandbox: 'danger-full-access',
     approvalPolicy: 'never',
     threadSource: 'user',
+    model: 'gpt-5.6-luna',
+    config: { model_reasoning_effort: 'max' },
   });
   assert.equal(calls[1].params.input[0].text, 'bootstrap');
+  assert.equal(calls[1].params.model, 'gpt-5.6-luna');
+  assert.equal(calls[1].params.effort, 'max');
   assert.equal(calls[2].params.input[0].text, 'first instruction');
+  assert.equal(calls[2].params.model, undefined);
+  assert.equal(calls[2].params.effort, undefined);
   assert.deepEqual(calls[3].params, { threadId: 'child-thread', name: 'Imported project context' });
   assert.deepEqual(calls[4].params, { threadId: 'child-thread', includeTurns: true });
+});
+
+test('creates a new session with model and effort on its first turn', async () => {
+  const calls = [];
+  let completed;
+  const client = {
+    waitForNotification(method, predicate) {
+      assert.equal(method, 'turn/completed');
+      return new Promise((resolve) => { completed = { predicate, resolve }; });
+    },
+    async request(method, params) {
+      calls.push({ method, params });
+      if (method === 'thread/start') return { thread: { id: 'new-thread' } };
+      if (method === 'turn/start') {
+        const turn = { id: 'turn-1', status: 'completed' };
+        queueMicrotask(() => {
+          const notification = { threadId: 'new-thread', turn };
+          assert.equal(completed.predicate(notification), true);
+          completed.resolve(notification);
+        });
+        return { turn };
+      }
+      if (method === 'thread/read') return { thread: { id: 'new-thread', cwd: '/tmp/sample-project' } };
+      throw new Error(`unexpected method: ${method}`);
+    },
+  };
+
+  const result = await createSession({
+    cwd: '/tmp/sample-project',
+    text: 'first prompt',
+    model: 'gpt-5.6-luna',
+    reasoningEffort: 'max',
+    timeoutMs: 1_000,
+    client,
+  });
+
+  assert.equal(result.threadId, 'new-thread');
+  assert.deepEqual(calls, [
+    {
+      method: 'thread/start',
+      params: {
+        cwd: '/tmp/sample-project',
+        ephemeral: false,
+        threadSource: 'user',
+        model: 'gpt-5.6-luna',
+        config: { model_reasoning_effort: 'max' },
+      },
+    },
+    {
+      method: 'turn/start',
+      params: {
+        threadId: 'new-thread',
+        cwd: '/tmp/sample-project',
+        input: [{ type: 'text', text: 'first prompt' }],
+        model: 'gpt-5.6-luna',
+        effort: 'max',
+      },
+    },
+    { method: 'thread/read', params: { threadId: 'new-thread', includeTurns: true } },
+  ]);
 });

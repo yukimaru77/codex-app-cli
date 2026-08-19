@@ -111,8 +111,12 @@ Add `--form <session-id>` to `send` (`--from` is an alias) to wait for the targe
 ```bash
 codex-app new \
   --cwd "$PWD" \
+  --model 'gpt-5.6-luna' \
+  --reasoning-effort max \
   --text 'Find the failing tests and fix them.'
 ```
+
+`--model` and `--reasoning-effort` are applied when the session is created and synchronized to the Desktop composer's complete thread settings after the first turn. The command ensures the in-memory App runtime is active first; this runtime also fixes a Desktop state race that could leave the composer displaying the previous effort even though the turn ran with the requested effort. The signed App bundle is not modified. The same options are supported by `recognize`, including its bootstrap turn and imported Desktop thread.
 
 Add `--profile` to select the initial in-app Browser profile for the new session. It accepts the same values as `codex-app profile restart --from`, including Chrome directory and display-name selectors.
 
@@ -120,6 +124,8 @@ Add `--profile` to select the initial in-app Browser profile for the new session
 codex-app new \
   --cwd "$PWD" \
   --profile 'chrome:Work' \
+  --model 'gpt-5.6-luna' \
+  --reasoning-effort max \
   --text 'Open the product and verify the signed-in flow.'
 ```
 
@@ -147,7 +153,7 @@ codex-app stop --conversation '<thread-id>'
 codex-app watch --conversation '<thread-id>'
 ```
 
-When `--model` or `--reasoning-effort` is specified, `send` first updates the conversation's thread settings and then starts the turn. This makes the selection visible in the App and preserves it for subsequent turns. `send` and `stop` first open the target thread so that the live Desktop handler owns it, then use private App IPC. Add `--dry-run` to print the request without sending it.
+When `--model` or `--reasoning-effort` is specified, `send` first updates the conversation's complete thread settings, including its collaboration-mode model and effort, and then starts the turn. Omitting both keeps the settings established by `new`, `recognize`, or an earlier `send`. `send` and `stop` first open the target thread so that the live Desktop handler owns it, then use private App IPC. Add `--dry-run` to print the request without sending it.
 
 ### Import an external rollout
 
@@ -170,6 +176,8 @@ codex-app recognize \
   --session-id '<template-session-id>' \
   --cwd '/path/to/workspace' \
   --name 'Imported project context' \
+  --model 'gpt-5.6-luna' \
+  --reasoning-effort max \
   --text 'Summarize the imported context.'
 ```
 

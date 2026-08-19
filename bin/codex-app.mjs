@@ -272,6 +272,24 @@ export async function activateProfileForNewConversation(
   return { from: profile, runtime, ipc };
 }
 
+export async function ensureSettingsRuntime(
+  profile,
+  {
+    options = {},
+    env = process.env,
+    status = () => runProfileCommand('status', {}, env),
+    activate = (from) => activateProfileForNewConversation(from, { options, env }),
+  } = {},
+) {
+  const current = status();
+  if (profile == null && current.runtimeActive) {
+    return { restarted: false, from: null, runtime: current };
+  }
+  const selectedProfile = profile ?? 'default';
+  const activation = await activate(selectedProfile);
+  return { restarted: true, ...activation };
+}
+
 export function selectNewConversationTransferProfile({
   beforeProfiles,
   afterProfiles,
@@ -590,7 +608,7 @@ export function installRollout(validation, home = codexHome()) {
   }
 }
 
-async function runAppServerTurn(client, threadId, cwd, text, timeoutMs) {
+async function runAppServerTurn(client, threadId, cwd, text, timeoutMs, { model, effort } = {}) {
   const completed = client.waitForNotification(
     'turn/completed',
     (params) => params?.threadId === threadId,
@@ -601,8 +619,9 @@ async function runAppServerTurn(client, threadId, cwd, text, timeoutMs) {
     started = await client.request('turn/start', {
       threadId,
       cwd,
-      effort: 'low',
       input: [{ type: 'text', text }],
+      ...(model ? { model } : {}),
+      ...(effort ? { effort } : {}),
     }, timeoutMs);
   } catch (error) {
     completed.cancel?.();
@@ -625,6 +644,8 @@ export async function recognizeSession({
   name,
   bootstrapText = DEFAULT_BOOTSTRAP_TEXT,
   initialText,
+  model,
+  reasoningEffort,
   timeoutMs = DEFAULT_TURN_TIMEOUT_MS,
   client,
 }) {
@@ -636,11 +657,14 @@ export async function recognizeSession({
     sandbox: 'danger-full-access',
     approvalPolicy: 'never',
     threadSource: 'user',
+    ...(model ? { model } : {}),
+    ...(reasoningEffort ? { config: { model_reasoning_effort: reasoningEffort } } : {}),
   }, timeoutMs);
   const threadId = forkResult?.thread?.id;
   if (!threadId) throw new Error('thread/fork did not return thread.id');
 
-  const bootstrapTurn = await runAppServerTurn(client, threadId, absoluteCwd, bootstrapText, timeoutMs);
+  const turnSettings = { model, effort: reasoningEffort };
+  const bootstrapTurn = await runAppServerTurn(client, threadId, absoluteCwd, bootstrapText, timeoutMs, turnSettings);
   let initialTurn = null;
   if (initialText) initialTurn = await runAppServerTurn(client, threadId, absoluteCwd, initialText, timeoutMs);
   await client.request('thread/name/set', { threadId, name }, timeoutMs);
@@ -653,6 +677,51 @@ export async function recognizeSession({
   if (thread.name !== name) throw new Error(`thread name mismatch: expected ${JSON.stringify(name)}, got ${JSON.stringify(thread.name)}`);
 
   return { threadId, thread, bootstrapTurn, initialTurn };
+}
+
+export async function createSession({ cwd, text, model, reasoningEffort, timeoutMs, client }) {
+  const absoluteCwd = path.resolve(cwd);
+  const started = await client.request('thread/start', {
+    cwd: absoluteCwd,
+    ephemeral: false,
+    threadSource: 'user',
+    ...(model ? { model } : {}),
+    ...(reasoningEffort ? { config: { model_reasoning_effort: reasoningEffort } } : {}),
+  }, timeoutMs);
+  const threadId = started?.thread?.id;
+  if (!threadId) throw new Error('thread/start did not return thread.id');
+  const turn = await runAppServerTurn(client, threadId, absoluteCwd, text, timeoutMs, {
+    model,
+    effort: reasoningEffort,
+  });
+  const readResult = await client.request('thread/read', { threadId, includeTurns: true }, timeoutMs);
+  if (readResult?.thread?.id !== threadId) throw new Error(`thread/read did not return new thread: ${threadId}`);
+  return { threadId, thread: readResult.thread, turn };
+}
+
+async function syncDesktopThreadSettings(conversationId, options, timeoutMs) {
+  const threadSettings = buildThreadSettings(options);
+  if (!threadSettings) return null;
+  const client = new CodexAppClient({
+    socketPath: options.socket ?? findSocketPath(),
+    timeoutMs,
+    clientType: 'codex-app-cli-new-settings-sync',
+  });
+  await client.connect();
+  try {
+    const response = await requestWhenHandlerReady(client, 'thread-follower-update-thread-settings', {
+      conversationId,
+      threadSettings,
+    }, {
+      targetClientId: options['target-client'],
+      readinessTimeoutMs: timeoutMs,
+      requestTimeoutMs: timeoutMs,
+    });
+    assertSuccess(response, 'thread-follower-update-thread-settings');
+    return threadSettings;
+  } finally {
+    client.close();
+  }
 }
 
 function assertSuccess(response, method) {
@@ -726,6 +795,16 @@ export function buildThreadSettings(options) {
   const settings = {};
   if (options.model) settings.model = options.model;
   if (options['reasoning-effort']) settings.effort = options['reasoning-effort'];
+  if (options.model && options['reasoning-effort']) {
+    settings.collaborationMode = {
+      mode: 'default',
+      settings: {
+        model: options.model,
+        reasoning_effort: options['reasoning-effort'],
+        developer_instructions: null,
+      },
+    };
+  }
   return Object.keys(settings).length === 0 ? null : settings;
 }
 
@@ -765,8 +844,8 @@ export function newThreadDeepLink({ cwd, text }) {
   return url.toString();
 }
 
-function openDeepLink(url) {
-  execFileSync('/usr/bin/open', [url], { stdio: 'ignore' });
+function openDeepLink(url, { background = false } = {}) {
+  execFileSync('/usr/bin/open', [...(background ? ['-g'] : []), url], { stdio: 'ignore' });
 }
 
 function submitAppComposer(delaySeconds = 4) {
@@ -929,9 +1008,9 @@ function usage() {
   codex-app rename --conversation <id> --name <name> [--dry-run]
   codex-app list [--cwd <path>] [--limit <n>] [--archived] [--json]
   codex-app read --conversation <id> [--all-item] [--json]
-  codex-app recognize --rollout <jsonl> --session-id <id> --cwd <workspace> [--name <name>] [--text <first instruction>] [--dry-run]
+  codex-app recognize --rollout <jsonl> --session-id <id> --cwd <workspace> [--name <name>] [--text <first instruction>] [--model <model>] [--reasoning-effort <effort>] [--profile <profile>] [--dry-run]
   codex-app open --conversation <id> [--dry-run]
-  codex-app new --text <prompt> [--cwd <path>] [--profile <profile>] [--dry-run]
+  codex-app new --text <prompt> [--cwd <path>] [--model <model>] [--reasoning-effort <effort>] [--profile <profile>] [--dry-run]
   codex-app send --conversation <id> --text <prompt> [--model <model>] [--reasoning-effort <effort>] [--form <conversation-id>] [--cwd <path>] [--dry-run]
   codex-app stop --conversation <id> [--dry-run]
   codex-app watch [--conversation <id>] [--timeout <ms>]
@@ -1088,11 +1167,19 @@ async function run(argv) {
         },
         bootstrapText: options['bootstrap-text'] ?? DEFAULT_BOOTSTRAP_TEXT,
         initialText: textFrom(options) || null,
+        model: options.model ?? null,
+        reasoningEffort: options['reasoning-effort'] ?? null,
+        settingsRuntime: (options.model || options['reasoning-effort'] || options.profile)
+          ? { ensure: true, profile: options.profile ?? 'default' }
+          : null,
         name,
       });
       return;
     }
 
+    const settingsRuntime = (options.model || options['reasoning-effort'] || options.profile)
+      ? await ensureSettingsRuntime(options.profile, { options })
+      : null;
     const installedPath = installRollout(validation);
     const timeoutMs = options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options);
     const client = new AppServerClient({
@@ -1109,6 +1196,8 @@ async function run(argv) {
         name,
         bootstrapText: options['bootstrap-text'] ?? DEFAULT_BOOTSTRAP_TEXT,
         initialText: textFrom(options) || null,
+        model: options.model,
+        reasoningEffort: options['reasoning-effort'],
         timeoutMs,
         client,
       });
@@ -1117,7 +1206,9 @@ async function run(argv) {
     }
 
     const appUrl = threadDeepLink(result.threadId);
-    openDeepLink(appUrl);
+    openDeepLink(appUrl, { background: true });
+    await delay(750);
+    const appliedThreadSettings = await syncDesktopThreadSettings(result.threadId, options, timeoutMs);
     printJson({
       ok: true,
       templateSessionId: validation.sessionId,
@@ -1127,6 +1218,8 @@ async function run(argv) {
       name: result.thread.name,
       bootstrapStatus: result.bootstrapTurn.status,
       initialTurnStatus: result.initialTurn?.status ?? null,
+      appliedThreadSettings,
+      settingsRuntime,
       appUrl,
     });
     return;
@@ -1148,6 +1241,52 @@ async function run(argv) {
 
   if (command === 'new') {
     const params = buildNewThreadParams(options);
+    if (options.model || options['reasoning-effort']) {
+      if (options['dry-run']) {
+        printJson({
+          type: 'app-server-session-create',
+          params: {
+            ...params,
+            model: options.model ?? null,
+            reasoningEffort: options['reasoning-effort'] ?? null,
+            settingsRuntime: { ensure: true, profile: options.profile ?? 'default' },
+          },
+        });
+        return;
+      }
+      const timeoutMs = options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options);
+      const settingsRuntime = await ensureSettingsRuntime(options.profile, { options });
+      const client = new AppServerClient({ command: options.codex ?? 'codex', timeoutMs });
+      let result;
+      try {
+        await client.start();
+        result = await createSession({
+          ...params,
+          model: options.model,
+          reasoningEffort: options['reasoning-effort'],
+          timeoutMs,
+          client,
+        });
+      } finally {
+        await client.close();
+      }
+      const url = threadDeepLink(result.threadId);
+      openDeepLink(url, { background: true });
+      await delay(750);
+      const appliedThreadSettings = await syncDesktopThreadSettings(result.threadId, options, timeoutMs);
+      printJson({
+        resultType: 'success',
+        result: { conversationId: result.threadId },
+        url,
+        submitted: true,
+        model: options.model ?? null,
+        reasoningEffort: options['reasoning-effort'] ?? null,
+        appliedThreadSettings,
+        settingsRuntime,
+        initialTurn: result.turn,
+      });
+      return;
+    }
     const url = newThreadDeepLink(params);
     if (options['dry-run']) {
       printJson({
@@ -1259,7 +1398,7 @@ async function run(argv) {
       timeoutMs: timeoutFrom(options),
       clientType: 'codex-app-cli-send',
     });
-    openDeepLink(threadDeepLink(options.conversation));
+    openDeepLink(threadDeepLink(options.conversation), { background: true });
     await delay(750);
     await client.connect();
     try {

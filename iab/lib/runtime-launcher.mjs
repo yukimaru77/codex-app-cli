@@ -14,6 +14,7 @@ import {
   appAsarPath,
   extractText,
   findMainBundle,
+  findRendererBundle,
 } from "./app-inspection.mjs";
 import {
   CODEX_BUNDLE_ID,
@@ -34,6 +35,7 @@ import {
 
 const require = createRequire(import.meta.url);
 const { inspectMainBundle } = require("../runtime/transform.cjs");
+const { transformRendererBundle } = require("../runtime/renderer-settings-patch.cjs");
 const { createProfileSeeder } = require("../runtime/profile-seed.cjs");
 
 export function defaultRuntimePreloadPath() {
@@ -49,6 +51,8 @@ export function inspectRuntimeCompatibility(appPath = "/Applications/ChatGPT.app
   const asarPath = appAsarPath(app.appPath);
   const mainBundle = findMainBundle(asarPath);
   const inspection = inspectMainBundle(extractText(asarPath, mainBundle));
+  const rendererBundle = findRendererBundle(asarPath);
+  const rendererInspection = transformRendererBundle(extractText(asarPath, rendererBundle));
   const compatible =
     inspection.isTargetBundle &&
     inspection.patches.every(({ occurrences }) => occurrences === 1);
@@ -59,7 +63,14 @@ export function inspectRuntimeCompatibility(appPath = "/Applications/ChatGPT.app
         .join(", ")}`,
     );
   }
-  return { app, compatible, mainBundle, patchPoints: inspection.patches };
+  return {
+    app,
+    compatible,
+    mainBundle,
+    rendererBundle,
+    rendererPatchPoints: rendererInspection.occurrences,
+    patchPoints: inspection.patches,
+  };
 }
 
 export function buildRuntimeOpenArguments({
