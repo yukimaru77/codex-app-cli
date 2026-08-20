@@ -49,6 +49,11 @@ const FOLLOWER_SETTINGS_FORWARD = "async function fce(e,t,n,r){let i=";
 const FOLLOWER_SETTINGS_FORWARD_REPLACEMENT =
   "async function fce(e,t,n,r){if(n.method===`thread-follower-update-thread-settings`){let e=JSON.stringify(`codex-app-cli-thread-settings:${n.params.conversationId}`),t=JSON.stringify(JSON.stringify(n.params.threadSettings)),r=`try{localStorage.setItem(${e},${t})}catch{}`;await Promise.allSettled(require(`electron`).webContents.getAllWebContents().map(e=>e.executeJavaScript(r,!0)))}let i=";
 
+const FOLLOWER_HANDLER_OWNER_CHECK =
+  "i=async({conversationId:t},r=b9)=>await C9(n.getThreadRole({hostId:e,conversationId:t}),r,`thread-role-timeout`)===`owner`,";
+const FOLLOWER_HANDLER_OWNER_CHECK_REPLACEMENT =
+  "i=async({conversationId:t},r=b9)=>(await C9(n.getThreadRole({hostId:e,conversationId:t}),r,`thread-role-timeout`))!=null,";
+
 const PATCHES = [
   [ATTACH_CALL, ATTACH_CALL_REPLACEMENT, "thread route passed to browser session"],
   [CONFIGURE_WEBVIEW, CONFIGURE_WEBVIEW_REPLACEMENT, "thread partition assigned to webview"],
@@ -87,19 +92,23 @@ function inspectMainBundle(source) {
 function transformMainBundle(source) {
   const inspection = inspectMainBundle(source);
   const followerSettingsOccurrences = countOccurrences(source, FOLLOWER_SETTINGS_FORWARD);
-  if (!inspection.isTargetBundle && followerSettingsOccurrences === 0) {
+  const followerHandlerOccurrences = countOccurrences(source, FOLLOWER_HANDLER_OWNER_CHECK);
+  if (!inspection.isTargetBundle && followerSettingsOccurrences === 0 && followerHandlerOccurrences === 0) {
     return { changed: false, inspection, source };
   }
 
   const invalid = inspection.isTargetBundle
     ? inspection.patches.filter((patch) => patch.occurrences !== 1)
     : [];
-  if (invalid.length > 0 || followerSettingsOccurrences > 1) {
+  if (invalid.length > 0 || followerSettingsOccurrences > 1 || followerHandlerOccurrences > 1) {
     throw new Error(
       `Codex IAB runtime patch does not match this App build: ${invalid
         .map((patch) => `${patch.description}=${patch.occurrences}`)
         .concat(followerSettingsOccurrences > 1
           ? [`thread settings persisted in app renderers=${followerSettingsOccurrences}`]
+          : [])
+        .concat(followerHandlerOccurrences > 1
+          ? [`follower handler owner check=${followerHandlerOccurrences}`]
           : [])
         .join(", ")}`,
     );
@@ -113,6 +122,9 @@ function transformMainBundle(source) {
   }
   if (followerSettingsOccurrences === 1) {
     transformed = transformed.replace(FOLLOWER_SETTINGS_FORWARD, FOLLOWER_SETTINGS_FORWARD_REPLACEMENT);
+  }
+  if (followerHandlerOccurrences === 1) {
+    transformed = transformed.replace(FOLLOWER_HANDLER_OWNER_CHECK, FOLLOWER_HANDLER_OWNER_CHECK_REPLACEMENT);
   }
   return { changed: true, inspection, source: transformed };
 }

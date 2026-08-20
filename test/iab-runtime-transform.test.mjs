@@ -77,6 +77,13 @@ test("persists forwarded thread settings from the auxiliary main-process chunk",
   assert.match(result.source, /webContents\.getAllWebContents/);
 });
 
+test("lets a follower view receive a turn so the App can resume an unavailable owner", () => {
+  const source = "i=async({conversationId:t},r=b9)=>await C9(n.getThreadRole({hostId:e,conversationId:t}),r,`thread-role-timeout`)===`owner`,";
+  const result = transformMainBundle(source);
+  assert.equal(result.changed, true);
+  assert.match(result.source, /thread-role-timeout`\)\)!=null/);
+});
+
 test("renderer hook replaces route metadata with a stable per-thread partition", () => {
   const originalSetAttribute = function setAttribute(name, value) {
     this.attributes.set(name, String(value));
