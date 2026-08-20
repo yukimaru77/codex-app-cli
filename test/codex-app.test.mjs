@@ -22,6 +22,7 @@ import {
   finalizeProfileForNewConversation,
   findSocketPath,
   installRollout,
+  interruptParams,
   lastAssistantMessageForTurn,
   newConversationCreationTimeout,
   recognizeSession,
@@ -39,6 +40,20 @@ import {
   waitForAppIpcReady,
   waitForNewConversation,
 } from '../bin/codex-app.mjs';
+
+test('stop targets the exact active turn when one is recorded', () => {
+  const records = [
+    { type: 'event_msg', payload: { type: 'task_started', turn_id: 'active-turn' } },
+  ];
+  assert.deepEqual(interruptParams('thread-id', records), {
+    conversationId: 'thread-id',
+    expectedTurnId: 'active-turn',
+  });
+  assert.deepEqual(interruptParams('thread-id', [
+    ...records,
+    { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'active-turn' } },
+  ]), { conversationId: 'thread-id' });
+});
 
 function writeRollout(directory, sessionId, records = null) {
   const filename = `rollout-2026-08-12T10-20-30-${sessionId}.jsonl`;

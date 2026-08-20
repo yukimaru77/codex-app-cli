@@ -1150,6 +1150,16 @@ export function turnStatus(records) {
   return result;
 }
 
+export function interruptParams(conversationId, records) {
+  const current = turnStatus(records);
+  return {
+    conversationId,
+    ...(current.status === 'inProgress' && current.turnId
+      ? { expectedTurnId: current.turnId }
+      : {}),
+  };
+}
+
 export async function renameThread(client, threadId, name, timeoutMs = DEFAULT_TIMEOUT_MS) {
   await client.request('thread/name/set', { threadId, name }, timeoutMs);
   const result = await client.request('thread/read', { threadId, includeTurns: false }, timeoutMs);
@@ -1660,7 +1670,11 @@ async function run(argv) {
 
   if (command === 'stop') {
     if (!options.conversation) throw new Error('stop requires --conversation <id>');
-    const params = { conversationId: options.conversation };
+    const rows = queryState(`SELECT rollout_path FROM threads WHERE id = ${sqlString(options.conversation)} LIMIT 1`);
+    const rolloutPath = rows[0]?.rollout_path;
+    if (!rolloutPath) throw new Error(`conversation not found: ${options.conversation}`);
+    const records = fs.readFileSync(rolloutPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    const params = interruptParams(options.conversation, records);
     if (options['dry-run']) {
       printJson(requestDescription('thread-follower-interrupt-turn', params, options));
       return;
