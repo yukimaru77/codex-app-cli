@@ -1451,8 +1451,17 @@ async function run(argv) {
         await client.close();
       }
       const url = threadDeepLink(result.threadId);
-      openDeepLink(url, { background: true });
-      await delay(750);
+      const profileFinalization = options.profile
+        ? await finalizeProfileForNewConversation({
+          conversationId: result.threadId,
+          sourceProfile: settingsRuntime.runtime.seedProfile,
+          options,
+        })
+        : null;
+      if (profileFinalization == null) {
+        openDeepLink(url, { background: true });
+        await delay(750);
+      }
       const appliedThreadSettings = await syncDesktopThreadSettings(result.threadId, options, timeoutMs);
       printJson({
         resultType: 'success',
@@ -1463,6 +1472,7 @@ async function run(argv) {
         reasoningEffort: options['reasoning-effort'] ?? null,
         appliedThreadSettings,
         settingsRuntime,
+        profileFinalization,
         initialTurn: result.turn,
       });
       return;
