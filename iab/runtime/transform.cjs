@@ -23,7 +23,7 @@ const ROUTE_PARSER_PREFIX_REPLACEMENT =
 const REGISTERED_ROUTE_LOOKUP =
   "let g=RB(c.partition),_=g==null?null:m.registeredWebviewHostsByRoutePartition.get(g)??null,v=IB(c),y=LB(c),";
 const REGISTERED_ROUTE_LOOKUP_REPLACEMENT =
-  "let v=PB(c),g=v==null?IB(c.partition):Le(v.conversationId,v.browserTabId),_=g==null?null:m.registeredWebviewHostsByRoutePartition.get(g)??null,y=FB(c),";
+  "let v=IB(c),g=v==null?RB(c.partition):Le(v.conversationId,v.browserTabId),_=g==null?null:m.registeredWebviewHostsByRoutePartition.get(g)??null,y=LB(c),";
 
 const SESSION_SERVICE_PREFIX =
   "var gV=class{options;configured=!1;constructor(e){this.options=e}configure(){let e=l.session.fromPartition(es(`app`));return this.configured?e:";

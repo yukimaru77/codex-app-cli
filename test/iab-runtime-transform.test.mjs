@@ -35,6 +35,10 @@ test("rewrites only IAB session selection to use the conversation ID", () => {
   assert.match(result.source, /__codexIabInstallChromeProfileImport/);
   assert.match(result.source, /data-codex-iab-renderer-instance-id/);
   assert.match(result.source, /#codex-iab-thread-profile:/);
+  assert.match(result.source, /let v=IB\(c\),g=v==null\?RB\(c\.partition\):Le\(v\.conversationId,v\.browserTabId\)/);
+  assert.match(result.source, /y=LB\(c\)/);
+  assert.doesNotMatch(result.source, /PB\(c\)/);
+  assert.doesNotMatch(result.source, /FB\(c\)/);
   assert.match(result.source, /Le\(v\.conversationId,v\.browserTabId\)/);
   assert.doesNotMatch(result.source, /t\.partition=es\(`app`\)/);
 });
