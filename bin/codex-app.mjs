@@ -14,6 +14,7 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_TURN_TIMEOUT_MS = 300_000;
+const DEFAULT_WATCH_TIMEOUT_MS = 14_400_000;
 const DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS = 20_000;
 const TEMPORARY_NEW_CONVERSATION_PROFILE_PREFIX = 'codex-browser-client-new-thread%253a';
 const DEFAULT_BOOTSTRAP_TEXT = 'Use the imported conversation context when answering future requests.';
@@ -1696,7 +1697,7 @@ async function run(argv) {
     const completion = await waitForNextTurnResult({
       readRecords,
       afterRecordCount,
-      timeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
+      timeoutMs: options.timeout == null ? DEFAULT_WATCH_TIMEOUT_MS : timeoutFrom(options),
       subscribe: (inspect) => {
         const watcher = fs.watch(rolloutPath, { persistent: true }, inspect);
         return () => watcher.close();

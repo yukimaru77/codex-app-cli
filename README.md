@@ -161,6 +161,8 @@ codex-app stop --conversation '<thread-id>'
 codex-app watch --conversation '<thread-id>'
 ```
 
+`watch` waits up to four hours by default so long-running browser E2E turns do not silently lose their result monitor. Use `--timeout <ms>` only when a different bound is intentional.
+
 When `--model` or `--reasoning-effort` is specified, `send` first updates the conversation's complete thread settings, including its collaboration-mode model and effort, and then starts the turn. Omitting both keeps the settings established by `new`, `recognize`, or an earlier `send`. `send` and `stop` first open the target thread so that the live Desktop handler owns it, then use private App IPC. Add `--dry-run` to print the request without sending it.
 
 ### Import an external rollout
