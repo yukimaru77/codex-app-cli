@@ -1160,6 +1160,19 @@ export function interruptParams(conversationId, records) {
   };
 }
 
+export function subscribeToRolloutChanges(rolloutPath, inspect, watchImpl = fs.watch) {
+  const filename = path.basename(rolloutPath);
+  const watchers = [
+    watchImpl(rolloutPath, { persistent: true }, inspect),
+    watchImpl(path.dirname(rolloutPath), { persistent: true }, (_eventType, changedFilename) => {
+      if (changedFilename == null || String(changedFilename) === filename) inspect();
+    }),
+  ];
+  return () => {
+    for (const watcher of watchers) watcher.close();
+  };
+}
+
 export async function renameThread(client, threadId, name, timeoutMs = DEFAULT_TIMEOUT_MS) {
   await client.request('thread/name/set', { threadId, name }, timeoutMs);
   const result = await client.request('thread/read', { threadId, includeTurns: false }, timeoutMs);
@@ -1259,10 +1272,7 @@ async function run(argv) {
       readRecords,
       expectedTurnId: options.turn,
       timeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
-      subscribe: (inspect) => {
-        const watcher = fs.watch(rolloutPath, { persistent: true }, inspect);
-        return () => watcher.close();
-      },
+      subscribe: (inspect) => subscribeToRolloutChanges(rolloutPath, inspect),
     });
     printJson({ ok: true, conversationId: options.conversation, ...completion });
     return;
@@ -1712,10 +1722,7 @@ async function run(argv) {
       readRecords,
       afterRecordCount,
       timeoutMs: options.timeout == null ? DEFAULT_WATCH_TIMEOUT_MS : timeoutFrom(options),
-      subscribe: (inspect) => {
-        const watcher = fs.watch(rolloutPath, { persistent: true }, inspect);
-        return () => watcher.close();
-      },
+      subscribe: (inspect) => subscribeToRolloutChanges(rolloutPath, inspect),
     });
     printJson({ ok: true, conversationId: options.conversation, ...completion });
     return;

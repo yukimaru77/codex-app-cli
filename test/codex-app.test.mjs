@@ -31,6 +31,7 @@ import {
   rolloutDestination,
   selectNewConversationTransferProfile,
   selectedTranscriptMessages,
+  subscribeToRolloutChanges,
   transcriptMessages,
   turnStatus,
   validateRollout,
@@ -53,6 +54,29 @@ test('stop targets the exact active turn when one is recorded', () => {
     ...records,
     { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'active-turn' } },
   ]), { conversationId: 'thread-id' });
+});
+
+test('rollout completion watches both the file and its directory', () => {
+  const registrations = [];
+  let inspections = 0;
+  const unsubscribe = subscribeToRolloutChanges('/tmp/sessions/rollout.jsonl', () => {
+    inspections += 1;
+  }, (target, options, callback) => {
+    const watcher = { closed: false, close() { this.closed = true; } };
+    registrations.push({ target, options, callback, watcher });
+    return watcher;
+  });
+
+  assert.deepEqual(registrations.map(({ target }) => target), [
+    '/tmp/sessions/rollout.jsonl',
+    '/tmp/sessions',
+  ]);
+  registrations[0].callback('change', 'rollout.jsonl');
+  registrations[1].callback('change', 'other.jsonl');
+  registrations[1].callback('change', 'rollout.jsonl');
+  assert.equal(inspections, 2);
+  unsubscribe();
+  assert.equal(registrations.every(({ watcher }) => watcher.closed), true);
 });
 
 function writeRollout(directory, sessionId, records = null) {
