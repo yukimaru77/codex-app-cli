@@ -800,6 +800,13 @@ export function buildStartTurnParams(options) {
   return params;
 }
 
+export function buildFollowerStartTurnParams(conversationId, options) {
+  return {
+    conversationId,
+    turnStart: buildStartTurnParams(options),
+  };
+}
+
 export function buildThreadSettings(options) {
   const settings = {};
   if (options.model) settings.model = options.model;
@@ -1524,10 +1531,7 @@ async function run(argv) {
     if (!rolloutPath) throw new Error(`conversation not found: ${options.conversation}`);
     const readRecords = () => fs.readFileSync(rolloutPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
     const beforeRecordCount = relayConversation ? readRecords().length : null;
-    const params = {
-      conversationId: options.conversation,
-      turnStartParams: buildStartTurnParams(options),
-    };
+    const params = buildFollowerStartTurnParams(options.conversation, options);
     const threadSettings = buildThreadSettings(options);
     if (options['dry-run']) {
       printJson({
@@ -1593,10 +1597,7 @@ async function run(argv) {
       });
       await relayClient.connect();
       try {
-        const relayParams = {
-          conversationId: relayConversation,
-          turnStartParams: buildStartTurnParams({ text: completion.message.text }),
-        };
+        const relayParams = buildFollowerStartTurnParams(relayConversation, { text: completion.message.text });
         const relayResponse = await requestWhenHandlerReady(relayClient, 'thread-follower-start-turn', relayParams, {
           readinessTimeoutMs: options.timeout == null ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS : timeoutFrom(options),
           requestTimeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),

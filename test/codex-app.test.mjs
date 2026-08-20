@@ -14,6 +14,7 @@ import {
   activateProfileForNewConversation,
   buildNewThreadParams,
   buildStartTurnParams,
+  buildFollowerStartTurnParams,
   buildThreadSettings,
   createSession,
   encodeFrame,
@@ -306,6 +307,13 @@ test('builds follow-up turn parameters', () => {
     attachments: [],
     cwd: '/tmp/project',
   });
+});
+
+test('uses the current App follower start-turn payload key', () => {
+  const params = buildFollowerStartTurnParams('thread-1', { text: 'continue' });
+  assert.equal(params.conversationId, 'thread-1');
+  assert.equal(params.turnStart.input[0].text, 'continue');
+  assert.equal('turnStartParams' in params, false);
 });
 
 test('generates one idempotency key for each follow-up turn request', () => {
