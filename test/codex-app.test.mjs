@@ -483,6 +483,24 @@ test('validates and installs a paginated rollout without overwriting', (context)
   assert.throws(() => installRollout(validation, home), /refusing to overwrite existing rollout/);
 });
 
+test('accepts a contiguous fork page with a nonzero first ordinal already in the session store', (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-cli-rollout-'));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const sessionId = '01900000-0000-7000-8000-000000000002';
+  const home = path.join(directory, 'codex-home');
+  const sessionDirectory = path.join(home, 'sessions', '2026', '08', '12');
+  fs.mkdirSync(sessionDirectory, { recursive: true });
+  const source = writeRollout(sessionDirectory, sessionId, [
+    { ordinal: 2343, type: 'session_meta', payload: { id: sessionId, session_id: sessionId } },
+    { ordinal: 2344, type: 'event_msg', payload: {} },
+  ]);
+
+  const validation = validateRollout(source, sessionId);
+  assert.equal(validation.firstOrdinal, 2343);
+  assert.equal(installRollout(validation, home), source);
+  assert.equal(fs.existsSync(source), true);
+});
+
 test('rejects rollout identity and ordinal mismatches', (context) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-cli-rollout-'));
   context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -493,10 +511,10 @@ test('rejects rollout identity and ordinal mismatches', (context) => {
   assert.throws(() => validateRollout(wrongIdentity, sessionId), /payload\.session_id does not match/);
 
   const ordinalPath = writeRollout(directory, sessionId, [
-    { ordinal: 0, type: 'session_meta', payload: { id: sessionId, session_id: sessionId } },
-    { ordinal: 3, type: 'event_msg', payload: {} },
+    { ordinal: 4, type: 'session_meta', payload: { id: sessionId, session_id: sessionId } },
+    { ordinal: 7, type: 'event_msg', payload: {} },
   ]);
-  assert.throws(() => validateRollout(ordinalPath, sessionId), /must have ordinal 1/);
+  assert.throws(() => validateRollout(ordinalPath, sessionId), /must have ordinal 5/);
 });
 
 test('app-server client performs JSONL handshake, requests, notifications, and errors', async () => {

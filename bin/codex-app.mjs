@@ -550,11 +550,18 @@ export function validateRollout(sourcePath, expectedSessionId) {
     } catch (error) {
       throw new Error(`invalid JSON on rollout line ${index + 1}: ${error.message}`);
     }
-    if (record.ordinal !== index) {
-      throw new Error(`rollout line ${index + 1} must have ordinal ${index}; got ${JSON.stringify(record.ordinal)}`);
-    }
     return record;
   });
+  const firstOrdinal = records[0]?.ordinal;
+  if (!Number.isSafeInteger(firstOrdinal) || firstOrdinal < 0) {
+    throw new Error(`rollout first ordinal must be a non-negative integer; got ${JSON.stringify(firstOrdinal)}`);
+  }
+  for (const [index, record] of records.entries()) {
+    const expectedOrdinal = firstOrdinal + index;
+    if (record.ordinal !== expectedOrdinal) {
+      throw new Error(`rollout line ${index + 1} must have ordinal ${expectedOrdinal}; got ${JSON.stringify(record.ordinal)}`);
+    }
+  }
   const meta = records[0];
   if (meta?.type !== 'session_meta') throw new Error('first rollout record must be session_meta');
   if (meta.payload?.id !== expectedSessionId) {
@@ -573,6 +580,7 @@ export function validateRollout(sourcePath, expectedSessionId) {
     day: filenameMatch[3],
     content,
     recordCount: records.length,
+    firstOrdinal,
   };
 }
 
@@ -582,6 +590,7 @@ export function rolloutDestination(validation, home = codexHome()) {
 
 export function installRollout(validation, home = codexHome()) {
   const destination = rolloutDestination(validation, home);
+  if (path.resolve(validation.sourcePath) === path.resolve(destination)) return destination;
   const directory = path.dirname(destination);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   const temporaryPath = path.join(directory, `.codex-app-cli-${process.pid}-${randomUUID()}.tmp`);

@@ -38,9 +38,13 @@ Before installing a file, `codex-app recognize` verifies that:
 - the filename date supplies the destination directory;
 - `session_meta.payload.id` and `session_meta.payload.session_id` both match;
 - every non-empty line is valid JSON; and
-- top-level `ordinal` values are exactly `0, 1, 2, ...`.
+- top-level `ordinal` values are contiguous non-negative integers. A fork page may begin at a
+  nonzero inherited ordinal.
 
-The command creates the destination with mode `0600` and refuses to overwrite an existing file. A missing ordinal caused paginated fork preparation to fail in the Codex CLI version used while developing this workflow:
+The command creates the destination with mode `0600` and refuses to overwrite an existing file.
+When the supplied rollout is already the exact destination in the shared session store, it reuses
+that file instead of attempting to overwrite it. A missing ordinal caused paginated fork preparation
+to fail in the Codex CLI version used while developing this workflow:
 
 ```text
 failed to prepare paginated fork:
