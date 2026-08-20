@@ -32,6 +32,7 @@ import {
   turnStatus,
   validateRollout,
   waitForTurnCompletion,
+  waitForNextTurnResult,
   waitForTurnResult,
   waitForAppIpcReady,
   waitForNewConversation,
@@ -456,6 +457,33 @@ test('waits for an exact turn using change notifications and returns its final r
     message: { timestamp: 'final-message', role: 'assistant', text: 'done' },
   });
   assert.equal(unsubscribed, true);
+});
+
+test('watch waits for the next turn and emits only its final result', async () => {
+  const records = [{ ordinal: 0, type: 'session_meta', payload: {} }];
+  let notify;
+  const completion = waitForNextTurnResult({
+    readRecords: () => records,
+    subscribe: (callback) => {
+      notify = callback;
+      return () => {};
+    },
+    afterRecordCount: records.length,
+    timeoutMs: 100,
+  });
+  records.push({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'next-turn' } });
+  notify();
+  records.push(
+    { timestamp: 'final-message', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }], internal_chat_message_metadata_passthrough: { turn_id: 'next-turn' } } },
+    { timestamp: 'completed', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'next-turn' } },
+  );
+  notify();
+  assert.deepEqual(await completion, {
+    status: 'completed',
+    turnId: 'next-turn',
+    completedAt: 'completed',
+    message: { timestamp: 'final-message', role: 'assistant', text: 'done' },
+  });
 });
 
 test('wait reports an exact aborted turn', async () => {
