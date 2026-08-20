@@ -801,9 +801,23 @@ export function buildStartTurnParams(options) {
 }
 
 export function buildFollowerStartTurnParams(conversationId, options) {
+  const { attachments, ...request } = buildStartTurnParams(options);
   return {
     conversationId,
-    turnStart: buildStartTurnParams(options),
+    turnStart: {
+      request: {
+        threadId: conversationId,
+        ...request,
+      },
+      context: {
+        attachments,
+        commentAttachments: [],
+        inheritThreadSettings: true,
+        useAppServerPermissionDefault: false,
+        usePermissionSelection: false,
+        mcpAppModelContextAttachments: [],
+      },
+    },
   };
 }
 

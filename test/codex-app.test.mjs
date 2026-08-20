@@ -312,7 +312,16 @@ test('builds follow-up turn parameters', () => {
 test('uses the current App follower start-turn payload key', () => {
   const params = buildFollowerStartTurnParams('thread-1', { text: 'continue' });
   assert.equal(params.conversationId, 'thread-1');
-  assert.equal(params.turnStart.input[0].text, 'continue');
+  assert.equal(params.turnStart.request.threadId, 'thread-1');
+  assert.equal(params.turnStart.request.input[0].text, 'continue');
+  assert.deepEqual(params.turnStart.context, {
+    attachments: [],
+    commentAttachments: [],
+    inheritThreadSettings: true,
+    useAppServerPermissionDefault: false,
+    usePermissionSelection: false,
+    mcpAppModelContextAttachments: [],
+  });
   assert.equal('turnStartParams' in params, false);
 });
 
