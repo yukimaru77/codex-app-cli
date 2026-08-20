@@ -81,7 +81,7 @@ test("lets a follower view receive a turn so the App can resume an unavailable o
   const source = "i=async({conversationId:t},r=b9)=>await C9(n.getThreadRole({hostId:e,conversationId:t}),r,`thread-role-timeout`)===`owner`,";
   const result = transformMainBundle(source);
   assert.equal(result.changed, true);
-  assert.match(result.source, /thread-role-timeout`\)\)!=null/);
+  assert.match(result.source, /i=async\(\)=>!0/);
 });
 
 test("renderer hook replaces route metadata with a stable per-thread partition", () => {

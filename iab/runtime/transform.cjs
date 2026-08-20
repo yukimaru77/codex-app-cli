@@ -52,7 +52,7 @@ const FOLLOWER_SETTINGS_FORWARD_REPLACEMENT =
 const FOLLOWER_HANDLER_OWNER_CHECK =
   "i=async({conversationId:t},r=b9)=>await C9(n.getThreadRole({hostId:e,conversationId:t}),r,`thread-role-timeout`)===`owner`,";
 const FOLLOWER_HANDLER_OWNER_CHECK_REPLACEMENT =
-  "i=async({conversationId:t},r=b9)=>(await C9(n.getThreadRole({hostId:e,conversationId:t}),r,`thread-role-timeout`))!=null,";
+  "i=async()=>!0,";
 
 const PATCHES = [
   [ATTACH_CALL, ATTACH_CALL_REPLACEMENT, "thread route passed to browser session"],
