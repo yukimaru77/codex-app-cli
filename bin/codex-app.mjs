@@ -19,7 +19,7 @@ const TEMPORARY_NEW_CONVERSATION_PROFILE_PREFIX = 'codex-browser-client-new-thre
 const DEFAULT_BOOTSTRAP_TEXT = 'Use the imported conversation context when answering future requests.';
 const VERSION_BY_METHOD = new Map([
   ['thread-owner-discovery', 1],
-  ['thread-follower-start-turn', 1],
+  ['thread-follower-start-turn', 2],
   ['thread-follower-update-thread-settings', 1],
   ['thread-follower-load-complete-history', 1],
   ['thread-follower-interrupt-turn', 4],

@@ -116,7 +116,7 @@ test('client initializes and sends a versioned request over IPC', async (context
   assert.equal(received[0].method, 'initialize');
   assert.equal('version' in received[0], false);
   assert.equal(received[1].sourceClientId, 'test-client');
-  assert.equal(received[1].version, 1);
+  assert.equal(received[1].version, 2);
 });
 
 test('waits through transient profile restart IPC failures', async () => {
