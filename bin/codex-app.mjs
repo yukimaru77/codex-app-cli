@@ -17,6 +17,8 @@ const DEFAULT_TURN_TIMEOUT_MS = 300_000;
 const DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS = 20_000;
 const TEMPORARY_NEW_CONVERSATION_PROFILE_PREFIX = 'codex-browser-client-new-thread%253a';
 const DEFAULT_BOOTSTRAP_TEXT = 'Use the imported conversation context when answering future requests.';
+const DEFAULT_FOLLOWER_MODEL = 'gpt-5.6-luna';
+const DEFAULT_FOLLOWER_REASONING_EFFORT = 'max';
 const VERSION_BY_METHOD = new Map([
   ['thread-owner-discovery', 1],
   ['thread-follower-start-turn', 2],
@@ -821,6 +823,14 @@ export function buildFollowerStartTurnParams(conversationId, options) {
   };
 }
 
+export function resolveFollowerTurnOptions(options) {
+  return {
+    ...options,
+    model: options.model || DEFAULT_FOLLOWER_MODEL,
+    'reasoning-effort': options['reasoning-effort'] || DEFAULT_FOLLOWER_REASONING_EFFORT,
+  };
+}
+
 export function buildThreadSettings(options) {
   const settings = {};
   if (options.model) settings.model = options.model;
@@ -1545,8 +1555,9 @@ async function run(argv) {
     if (!rolloutPath) throw new Error(`conversation not found: ${options.conversation}`);
     const readRecords = () => fs.readFileSync(rolloutPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
     const beforeRecordCount = relayConversation ? readRecords().length : null;
-    const params = buildFollowerStartTurnParams(options.conversation, options);
-    const threadSettings = buildThreadSettings(options);
+    const followerOptions = resolveFollowerTurnOptions(options);
+    const params = buildFollowerStartTurnParams(options.conversation, followerOptions);
+    const threadSettings = buildThreadSettings(followerOptions);
     if (options['dry-run']) {
       printJson({
         ...requestDescription('thread-follower-start-turn', params, options),
@@ -1611,7 +1622,10 @@ async function run(argv) {
       });
       await relayClient.connect();
       try {
-        const relayParams = buildFollowerStartTurnParams(relayConversation, { text: completion.message.text });
+        const relayParams = buildFollowerStartTurnParams(
+          relayConversation,
+          resolveFollowerTurnOptions({ text: completion.message.text }),
+        );
         const relayResponse = await requestWhenHandlerReady(relayClient, 'thread-follower-start-turn', relayParams, {
           readinessTimeoutMs: options.timeout == null ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS : timeoutFrom(options),
           requestTimeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),

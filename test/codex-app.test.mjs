@@ -26,6 +26,7 @@ import {
   newConversationCreationTimeout,
   recognizeSession,
   renameThread,
+  resolveFollowerTurnOptions,
   rolloutDestination,
   selectNewConversationTransferProfile,
   selectedTranscriptMessages,
@@ -323,6 +324,23 @@ test('uses the current App follower start-turn payload key', () => {
     mcpAppModelContextAttachments: [],
   });
   assert.equal('turnStartParams' in params, false);
+});
+
+test('defaults follower turns to the supported Luna model at max effort', () => {
+  assert.deepEqual(resolveFollowerTurnOptions({ text: 'continue' }), {
+    text: 'continue',
+    model: 'gpt-5.6-luna',
+    'reasoning-effort': 'max',
+  });
+  assert.deepEqual(resolveFollowerTurnOptions({
+    text: 'continue',
+    model: 'custom-model',
+    'reasoning-effort': 'low',
+  }), {
+    text: 'continue',
+    model: 'custom-model',
+    'reasoning-effort': 'low',
+  });
 });
 
 test('generates one idempotency key for each follow-up turn request', () => {
