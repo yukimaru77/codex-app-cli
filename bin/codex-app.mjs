@@ -962,6 +962,63 @@ export async function waitForTurnCompletion({
   throw new Error(`turn completion timed out after ${timeoutMs}ms${turnId ? `: ${turnId}` : ''}`);
 }
 
+export async function waitForTurnResult({
+  readRecords,
+  subscribe,
+  expectedTurnId,
+  timeoutMs,
+}) {
+  if (!expectedTurnId) throw new Error('wait requires --turn <id>');
+  let settled = false;
+  let unsubscribe = () => {};
+  let timer;
+
+  return new Promise((resolve, reject) => {
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsubscribe();
+      callback(value);
+    };
+    const inspect = () => {
+      if (settled) return;
+      try {
+        const records = readRecords();
+        const lifecycle = records.filter((record) => (
+          record?.type === 'event_msg'
+          && (record.payload?.type === 'task_complete' || record.payload?.type === 'turn_aborted')
+          && record.payload?.turn_id === expectedTurnId
+        )).at(-1);
+        if (!lifecycle) return;
+        if (lifecycle.payload.type === 'turn_aborted') {
+          finish(reject, new Error(`turn aborted: ${expectedTurnId}`));
+          return;
+        }
+        const message = lastAssistantMessageForTurn(records, expectedTurnId);
+        if (!message) {
+          finish(reject, new Error(`completed turn has no assistant message: ${expectedTurnId}`));
+          return;
+        }
+        finish(resolve, {
+          status: 'completed',
+          turnId: expectedTurnId,
+          completedAt: lifecycle.timestamp ?? null,
+          message,
+        });
+      } catch (error) {
+        finish(reject, error);
+      }
+    };
+
+    timer = setTimeout(() => {
+      finish(reject, new Error(`turn completion timed out after ${timeoutMs}ms: ${expectedTurnId}`));
+    }, timeoutMs);
+    unsubscribe = subscribe(inspect);
+    inspect();
+  });
+}
+
 export function turnStatus(records) {
   let result = { status: 'idle', turnId: null, updatedAt: null };
   for (const record of records) {
@@ -1005,6 +1062,7 @@ function usage() {
   process.stdout.write(`Usage:
   codex-app status [--socket <path>]
   codex-app turn-status --conversation <id>
+  codex-app wait --conversation <id> --turn <id> [--timeout <ms>]
   codex-app rename --conversation <id> --name <name> [--dry-run]
   codex-app list [--cwd <path>] [--limit <n>] [--archived] [--json]
   codex-app read --conversation <id> [--all-item] [--json]
@@ -1074,6 +1132,26 @@ async function run(argv) {
       conversationId: options.conversation,
       ...turnStatus(records),
     });
+    return;
+  }
+
+  if (command === 'wait') {
+    if (!options.conversation) throw new Error('wait requires --conversation <id>');
+    if (!options.turn) throw new Error('wait requires --turn <id>');
+    const rows = queryState(`SELECT rollout_path FROM threads WHERE id = ${sqlString(options.conversation)} LIMIT 1`);
+    const rolloutPath = rows[0]?.rollout_path;
+    if (!rolloutPath) throw new Error(`conversation not found: ${options.conversation}`);
+    const readRecords = () => fs.readFileSync(rolloutPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    const completion = await waitForTurnResult({
+      readRecords,
+      expectedTurnId: options.turn,
+      timeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
+      subscribe: (inspect) => {
+        const watcher = fs.watch(rolloutPath, { persistent: true }, inspect);
+        return () => watcher.close();
+      },
+    });
+    printJson({ ok: true, conversationId: options.conversation, ...completion });
     return;
   }
 

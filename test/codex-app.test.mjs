@@ -32,6 +32,7 @@ import {
   turnStatus,
   validateRollout,
   waitForTurnCompletion,
+  waitForTurnResult,
   waitForAppIpcReady,
   waitForNewConversation,
 } from '../bin/codex-app.mjs';
@@ -427,6 +428,44 @@ test('waits for an already-running turn returned by the App IPC response', async
   const completion = await waitForTurnCompletion({ readRecords: () => records, afterRecordCount: 1, expectedTurnId: 'active-turn', timeoutMs: 100, pollMs: 1 });
   assert.equal(completion.turnId, 'active-turn');
   assert.equal(completion.message.text, 'final');
+});
+
+test('waits for an exact turn using change notifications and returns its final result', async () => {
+  const records = [];
+  let notify;
+  let unsubscribed = false;
+  const completion = waitForTurnResult({
+    readRecords: () => records,
+    subscribe: (callback) => {
+      notify = callback;
+      return () => { unsubscribed = true; };
+    },
+    expectedTurnId: 'target-turn',
+    timeoutMs: 100,
+  });
+  records.push(
+    { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'other-turn' } },
+    { timestamp: 'final-message', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }], internal_chat_message_metadata_passthrough: { turn_id: 'target-turn' } } },
+    { timestamp: 'completed', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'target-turn' } },
+  );
+  notify();
+  assert.deepEqual(await completion, {
+    status: 'completed',
+    turnId: 'target-turn',
+    completedAt: 'completed',
+    message: { timestamp: 'final-message', role: 'assistant', text: 'done' },
+  });
+  assert.equal(unsubscribed, true);
+});
+
+test('wait reports an exact aborted turn', async () => {
+  const records = [{ type: 'event_msg', payload: { type: 'turn_aborted', turn_id: 'target-turn' } }];
+  await assert.rejects(waitForTurnResult({
+    readRecords: () => records,
+    subscribe: () => () => {},
+    expectedTurnId: 'target-turn',
+    timeoutMs: 100,
+  }), /turn aborted: target-turn/);
 });
 
 test('validates and installs a paginated rollout without overwriting', (context) => {

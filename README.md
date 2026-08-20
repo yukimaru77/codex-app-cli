@@ -40,6 +40,7 @@ The package installs its runtime dependencies with `npm link` or `npm install`.
 | --- | --- | --- |
 | `status` | private App IPC | Verify that the local App IPC router is reachable. |
 | `turn-status` | state database + rollout JSONL | Report the latest turn lifecycle status. |
+| `wait` | state database + rollout change notifications | Wait for one exact turn and print only its final result. |
 | `rename` | `codex app-server` | Change a conversation's display name and verify it. |
 | `list` | `~/.codex/state_5.sqlite` | List locally stored conversations. |
 | `read` | state database + rollout JSONL | Print a conversation transcript. |
@@ -97,10 +98,17 @@ codex-app read --conversation '<thread-id>'
 codex-app read --conversation '<thread-id>' --json
 codex-app read --conversation '<thread-id>' --all-item
 codex-app turn-status --conversation '<thread-id>'
+
+codex-app wait \
+  --conversation '<thread-id>' \
+  --turn '<turn-id>' \
+  --timeout 14400000
 codex-app rename --conversation '<thread-id>' --name 'New chat name'
 ```
 
 `turn-status` reports `idle`, `inProgress`, `completed`, or `aborted` from the latest lifecycle event in the rollout.
+
+`wait` subscribes to rollout file changes without polling. It ignores other turns and emits one JSON result after the requested turn completes. An aborted turn, missing final assistant response, or timeout exits with an error.
 
 `read` returns only the latest message by default. Add `--all-item` to return the full message transcript.
 
