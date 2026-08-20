@@ -8,9 +8,9 @@ const { transformRendererBundle } = require("../iab/runtime/renderer-settings-pa
 test("removes both stale-state guards from the installed renderer bundle", () => {
   const source = [
     "async updateThreadSettingsForNextTurn(e,t){let n=0}",
-    "this.getConversation(e)?.latestThreadSettings===i&&this.updateConversationState(e,e=>{Ksn(e,t)})",
-    "this.getConversation(e)?.latestThreadSettings===a&&this.updateConversationState(e,e=>{Ksn(e,t)})",
-    "let v=OOc(_),{modelSettings:y,selectComposerModelAndReasoningEffort:b,setModelAndReasoningEffort:x}=v,S;",
+    "this.getConversation(e)?.latestThreadSettings===i&&this.updateConversationState(e,e=>{Aat(e,t)})",
+    "this.getConversation(e)?.latestThreadSettings===a&&this.updateConversationState(e,e=>{Aat(e,t)})",
+    "let v=ZVc(_),{modelSettings:y,selectComposerModelAndReasoningEffort:b,setModelAndReasoningEffort:x}=v,S;",
   ].join(";");
   const result = transformRendererBundle(source);
   assert.deepEqual(result.occurrences, [1, 1, 1, 1]);

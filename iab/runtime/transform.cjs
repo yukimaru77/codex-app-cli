@@ -1,14 +1,14 @@
 const { rendererPatchSource } = require("./renderer-patch.cjs");
 
 const ATTACH_CALL =
-  "GB({configureBrowserSession:i,params:c,preloadPath:f,webPreferences:o})";
+  "qB({configureBrowserSession:i,params:c,preloadPath:f,webPreferences:o})";
 const ATTACH_CALL_REPLACEMENT =
-  "GB({configureBrowserSession:i,conversationId:O.conversationId,params:c,preloadPath:f,webPreferences:o})";
+  "qB({configureBrowserSession:i,conversationId:O.conversationId,params:c,preloadPath:f,webPreferences:o})";
 
 const CONFIGURE_WEBVIEW =
-  "function GB({configureBrowserSession:e,params:t,preloadPath:n,webPreferences:r}){t.partition=$o(`app`),r.session=e(),r.preload=n,qB(t,r)}";
+  "function qB({configureBrowserSession:e,params:t,preloadPath:n,webPreferences:r}){t.partition=es(`app`),r.session=e(),r.preload=n,YB(t,r)}";
 const CONFIGURE_WEBVIEW_REPLACEMENT =
-  "function GB({configureBrowserSession:e,conversationId:o,params:t,preloadPath:n,webPreferences:r}){t.partition=$o(o),r.session=e(o),r.preload=n,qB(t,r)}";
+  "function qB({configureBrowserSession:e,conversationId:o,params:t,preloadPath:n,webPreferences:r}){t.partition=es(o),r.session=e(o),r.preload=n,YB(t,r)}";
 
 const CONFIGURE_SESSION_CALLBACK =
   "configureBrowserSession:()=>this.browserSessionService.configure(),";
@@ -16,19 +16,19 @@ const CONFIGURE_SESSION_CALLBACK_REPLACEMENT =
   "configureBrowserSession:e=>this.browserSessionService.configure(e),";
 
 const ROUTE_PARSER_PREFIX =
-  "function PB(e){let t=e[MB]??e[`data-conversation-id`]??null,n=e[NB]??null;";
+  "function IB(e){let t=e[PB]??e[`data-conversation-id`]??null,n=e[FB]??null;";
 const ROUTE_PARSER_PREFIX_REPLACEMENT =
-  "function PB(e){let c=e.src,m=`#codex-iab-thread-profile:`,d=typeof c==`string`?c.indexOf(m):-1;if(d>=0)try{let[t,n]=decodeURIComponent(c.slice(d+m.length)).split(`\\0`);if(t?.length>0&&n?.length>0)return{browserTabId:oe(n),conversationId:t}}catch{}let t=e[MB]??e[`data-conversation-id`]??null,n=e[NB]??null;";
+  "function IB(e){let c=e.src,m=`#codex-iab-thread-profile:`,d=typeof c==`string`?c.indexOf(m):-1;if(d>=0)try{let[t,n]=decodeURIComponent(c.slice(d+m.length)).split(`\\0`);if(t?.length>0&&n?.length>0)return{browserTabId:se(n),conversationId:t}}catch{}let t=e[PB]??e[`data-conversation-id`]??null,n=e[FB]??null;";
 
 const REGISTERED_ROUTE_LOOKUP =
-  "let g=IB(c.partition),_=g==null?null:m.registeredWebviewHostsByRoutePartition.get(g)??null,v=PB(c),y=FB(c),";
+  "let g=RB(c.partition),_=g==null?null:m.registeredWebviewHostsByRoutePartition.get(g)??null,v=IB(c),y=LB(c),";
 const REGISTERED_ROUTE_LOOKUP_REPLACEMENT =
   "let v=PB(c),g=v==null?IB(c.partition):Le(v.conversationId,v.browserTabId),_=g==null?null:m.registeredWebviewHostsByRoutePartition.get(g)??null,y=FB(c),";
 
 const SESSION_SERVICE_PREFIX =
-  "var mV=class{options;configured=!1;constructor(e){this.options=e}configure(){let e=l.session.fromPartition($o(`app`));return this.configured?e:";
+  "var gV=class{options;configured=!1;constructor(e){this.options=e}configure(){let e=l.session.fromPartition(es(`app`));return this.configured?e:";
 const SESSION_SERVICE_PREFIX_REPLACEMENT =
-  "var mV=class{options;configured=new Set;constructor(e){this.options=e}configure(t=`app`){let e=(globalThis.__codexIabSeedProfile?.($o(t)),l.session.fromPartition($o(t)));return this.configured.has(t)?e:";
+  "var gV=class{options;configured=new Set;constructor(e){this.options=e}configure(t=`app`){let e=(globalThis.__codexIabSeedProfile?.(es(t)),l.session.fromPartition(es(t)));return this.configured.has(t)?e:";
 
 const SESSION_SERVICE_SUFFIX =
   "}),this.configured=!0,e)}async clearBrowsingData";
@@ -36,9 +36,9 @@ const SESSION_SERVICE_SUFFIX_REPLACEMENT =
   "}),this.configured.add(t),e)}async clearBrowsingData";
 
 const HOST_METADATA_PREFIX =
-  "function FB(e){let t=e.partition;if(typeof t!=`string`)return null;";
+  "function LB(e){let t=e.partition;if(typeof t!=`string`)return null;";
 const HOST_METADATA_PREFIX_REPLACEMENT =
-  "function FB(e){let u=e.src,m=`#codex-iab-thread-profile:`,d=typeof u==`string`?u.indexOf(m):-1;if(d>=0)try{let[,,c,l]=decodeURIComponent(u.slice(d+m.length)).split(`\\0`),h=Number(l);if(c?.length>0&&Number.isInteger(h)&&h>0)return{hostGeneration:h,rendererInstanceId:c}}catch{}let c=e[`data-codex-iab-renderer-instance-id`],l=Number(e[`data-codex-iab-host-generation`]);if(typeof c==`string`&&c.length>0&&Number.isInteger(l)&&l>0)return{hostGeneration:l,rendererInstanceId:c};let t=e.partition;if(typeof t!=`string`)return null;";
+  "function LB(e){let u=e.src,m=`#codex-iab-thread-profile:`,d=typeof u==`string`?u.indexOf(m):-1;if(d>=0)try{let[,,c,l]=decodeURIComponent(u.slice(d+m.length)).split(`\\0`),h=Number(l);if(c?.length>0&&Number.isInteger(h)&&h>0)return{hostGeneration:h,rendererInstanceId:c}}catch{}let c=e[`data-codex-iab-renderer-instance-id`],l=Number(e[`data-codex-iab-host-generation`]);if(typeof c==`string`&&c.length>0&&Number.isInteger(l)&&l>0)return{hostGeneration:l,rendererInstanceId:c};let t=e.partition;if(typeof t!=`string`)return null;";
 
 const ELECTRON_IMPORT_SUFFIX =
   "l=e.o(l);let d=require(\"node:os\")";

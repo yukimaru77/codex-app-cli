@@ -1,14 +1,14 @@
 const SETTINGS_GUARDS = [
-  "this.getConversation(e)?.latestThreadSettings===i&&this.updateConversationState(e,e=>{Ksn(e,t)})",
-  "this.getConversation(e)?.latestThreadSettings===a&&this.updateConversationState(e,e=>{Ksn(e,t)})",
+  "this.getConversation(e)?.latestThreadSettings===i&&this.updateConversationState(e,e=>{Aat(e,t)})",
+  "this.getConversation(e)?.latestThreadSettings===a&&this.updateConversationState(e,e=>{Aat(e,t)})",
 ];
 const SETTINGS_METHOD_PREFIX = "async updateThreadSettingsForNextTurn(e,t){let n=";
 const SETTINGS_METHOD_PREFIX_REPLACEMENT =
-  "async updateThreadSettingsForNextTurn(e,t){try{localStorage.setItem(`codex-app-cli-thread-settings:${e}`,JSON.stringify(t))}catch{}this.updateConversationState(e,e=>{Ksn(e,t)});let n=";
+  "async updateThreadSettingsForNextTurn(e,t){try{localStorage.setItem(`codex-app-cli-thread-settings:${e}`,JSON.stringify(t))}catch{}this.updateConversationState(e,e=>{Aat(e,t)});let n=";
 const COMPOSER_SETTINGS_SOURCE =
-  "let v=OOc(_),{modelSettings:y,selectComposerModelAndReasoningEffort:b,setModelAndReasoningEffort:x}=v,S;";
+  "let v=ZVc(_),{modelSettings:y,selectComposerModelAndReasoningEffort:b,setModelAndReasoningEffort:x}=v,S;";
 const COMPOSER_SETTINGS_REPLACEMENT =
-  "let v=OOc(_),{modelSettings:y,selectComposerModelAndReasoningEffort:b,setModelAndReasoningEffort:x}=v,S;y=(()=>{try{let e=JSON.parse(localStorage.getItem(`codex-app-cli-thread-settings:${n}`)),t=e?.effort===`max`?`xhigh`:e?.effort;return e?{...y,model:e.model??y.model,reasoningEffort:t??y.reasoningEffort}:y}catch{return y}})();";
+  "let v=ZVc(_),{modelSettings:y,selectComposerModelAndReasoningEffort:b,setModelAndReasoningEffort:x}=v,S;y=(()=>{try{let e=JSON.parse(localStorage.getItem(`codex-app-cli-thread-settings:${n}`)),t=e?.effort===`max`?`xhigh`:e?.effort;return e?{...y,model:e.model??y.model,reasoningEffort:t??y.reasoningEffort}:y}catch{return y}})();";
 
 function countOccurrences(source, needle) {
   return source.split(needle).length - 1;

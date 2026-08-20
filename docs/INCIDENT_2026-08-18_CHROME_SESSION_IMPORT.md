@@ -1,5 +1,36 @@
 # 2026-08-18 Codex App更新後のIAB起動・Chrome認証移行障害
 
+## 2026-08-21: main・renderer bundle更新への追従
+
+Codex App更新後、main bundleが `.vite/build/main-Cwjv9Ibf.js`、renderer bundleが
+`webview/assets/app-initial-DOX-K1rC.js` へ変わり、main patch pointのうち6個と
+renderer patch pointのうち3個が0件になった。前回と同じく意味上の差し替え範囲は
+増やさず、現行bundleのminify済み識別子に対する完全一致文字列だけを更新した。
+
+```text
+$ npm test
+tests 77
+pass 77
+fail 0
+
+$ npm run verify
+compatible: true
+main patch point occurrences: 1 x 9
+renderer patch point occurrences: 1 x 4
+
+$ codex-app profile restart --from default
+status: running
+IPC ready: true
+runtimeActive: true
+signed App modified: false
+```
+
+今回も、App bundleの更新検知時はエラーに列挙された0件の文字列だけを見るのではなく、
+旧文字列の周辺にあった安定した意味上の目印（`configureBrowserSession`、
+`registeredWebviewHostsByRoutePartition`、`updateThreadSettingsForNextTurn` など）から
+現行処理を探す。現行処理を一意に特定した後、その完全一致文字列を更新し、main 9点・
+renderer 4点が各1件になることを実App inspectionで確認する。
+
 ## 2026-08-19: App 26.814での再発と対応
 
 Codex App `26.814.41407`（build `6720`）への更新後、`profile inspect` が9個の
