@@ -37,7 +37,9 @@ const require = createRequire(import.meta.url);
 const { inspectMainBundle } = require("../runtime/transform.cjs");
 const { transformRendererBundle } = require("../runtime/renderer-settings-patch.cjs");
 const { createProfileSeeder } = require("../runtime/profile-seed.cjs");
+const { inspectBrowserServiceModule } = require("../runtime/browser-plugin-path.cjs");
 export const { RUNTIME_PATCH_VERSION } = require("../runtime/version.cjs");
+export { inspectBrowserServiceModule };
 
 export function defaultRuntimePreloadPath() {
   return path.resolve(import.meta.dirname, "..", "runtime", "preload.cjs");
@@ -53,7 +55,15 @@ export function inspectRuntimeCompatibility(appPath = "/Applications/ChatGPT.app
   const mainBundle = findMainBundle(asarPath);
   const inspection = inspectMainBundle(extractText(asarPath, mainBundle));
   const rendererBundle = findRendererBundle(asarPath);
-  const rendererInspection = transformRendererBundle(extractText(asarPath, rendererBundle));
+  let rendererInspection;
+  try {
+    rendererInspection = transformRendererBundle(extractText(asarPath, rendererBundle));
+  } catch (error) {
+    rendererInspection = {
+      occurrences: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
   const compatible =
     inspection.isTargetBundle &&
     inspection.patches.every(({ occurrences }) => occurrences === 1);
@@ -71,6 +81,7 @@ export function inspectRuntimeCompatibility(appPath = "/Applications/ChatGPT.app
     rendererBundle,
     rendererPatchPoints: rendererInspection.occurrences,
     patchPoints: inspection.patches,
+    browserService: inspectBrowserServiceModule(),
   };
 }
 

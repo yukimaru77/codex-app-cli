@@ -43,7 +43,7 @@ const HOST_METADATA_PREFIX_REPLACEMENT =
 const ELECTRON_IMPORT_SUFFIX =
   "l=e.o(l);let d=require(\"node:os\")";
 const ELECTRON_IMPORT_SUFFIX_REPLACEMENT =
-  `l=e.o(l);globalThis.__codexIabInstallChromeProfileImport?.(l);l.app.on(\`web-contents-created\`,(e,t)=>{globalThis.__codexInstallRendererSettingsPatch?.(t);t.on(\`dom-ready\`,()=>{t.executeJavaScript(${JSON.stringify(rendererPatchSource())},!0).then(e=>{e&&globalThis.__codexIabRuntimeLog?.({event:\`renderer-partition-hook-installed\`,webContentsId:t.id})}).catch(e=>{globalThis.__codexIabRuntimeLog?.({event:\`renderer-partition-hook-failed\`,error:e instanceof Error?e.message:String(e),webContentsId:t.id})})})});let d=require(\"node:os\")`;
+  `l=e.o(l);globalThis.__codexIabInstallChromeProfileImport?.(l);globalThis.__codexIabInstallTrustedServicePathHooks?.(l);l.app.on(\`web-contents-created\`,(e,t)=>{globalThis.__codexInstallRendererSettingsPatch?.(t);t.on(\`dom-ready\`,()=>{t.executeJavaScript(${JSON.stringify(rendererPatchSource())},!0).then(e=>{e&&globalThis.__codexIabRuntimeLog?.({event:\`renderer-partition-hook-installed\`,webContentsId:t.id})}).catch(e=>{globalThis.__codexIabRuntimeLog?.({event:\`renderer-partition-hook-failed\`,error:e instanceof Error?e.message:String(e),webContentsId:t.id})})})});let d=require(\"node:os\")`;
 
 const FOLLOWER_SETTINGS_FORWARD = "async function fce(e,t,n,r){let i=";
 const FOLLOWER_SETTINGS_FORWARD_REPLACEMENT =

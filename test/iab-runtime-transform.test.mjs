@@ -33,6 +33,7 @@ test("rewrites only IAB session selection to use the conversation ID", () => {
   assert.match(result.source, /fromPartition\(es\(t\)\)/);
   assert.match(result.source, /configured\.add\(t\)/);
   assert.match(result.source, /__codexIabInstallChromeProfileImport/);
+  assert.match(result.source, /__codexIabInstallTrustedServicePathHooks/);
   assert.match(result.source, /data-codex-iab-renderer-instance-id/);
   assert.match(result.source, /#codex-iab-thread-profile:/);
   assert.match(result.source, /let v=IB\(c\),g=v==null\?RB\(c\.partition\):Le\(v\.conversationId,v\.browserTabId\)/);
@@ -68,10 +69,13 @@ test("installed App main bundle matches the runtime patch", () => {
   assert.equal(transformMainBundle(source).changed, true);
 });
 
-test("installed App renderer bundle matches the settings patch", () => {
+test("installed App renderer settings patch fail-closes on the current bundle", () => {
   const asarPath = appAsarPath("/Applications/ChatGPT.app");
   const source = extractText(asarPath, findRendererBundle(asarPath));
-  assert.deepEqual(transformRendererBundle(source).occurrences, [1, 1, 1, 1]);
+  assert.throws(
+    () => transformRendererBundle(source),
+    /does not match this App build/,
+  );
 });
 
 test("persists forwarded thread settings from the auxiliary main-process chunk", () => {
