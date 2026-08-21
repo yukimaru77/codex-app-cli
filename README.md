@@ -85,16 +85,7 @@ codex-app profile restart --from 'chrome:Profile 1'
 codex-app profile restart --from 'chrome:Work'
 ```
 
-`--from` chooses the seed. To apply it to an existing Codex session, specify its ID with `--conversation`. Existing session storage is preserved unless `--replace` is explicit; replacement first creates a timestamped backup.
-
-```bash
-codex-app profile restart \
-  --from 'chrome:Profile 1' \
-  --conversation '<session-id>' \
-  --replace
-```
-
-Repeated `--thread <id>` is also accepted when preparing multiple sessions in one restart. Close Chrome before importing a Chrome profile. Return to an ordinary unpatched App launch with `codex-app profile restore`.
+`--from` chooses the seed for sessions created afterward. Existing sessions keep the Browser profile assigned when they were created; `profile restart` does not change it. Choose the intended profile at creation with `new --profile` or `recognize --profile`. Close Chrome before importing a Chrome profile. Return to an ordinary unpatched App launch with `codex-app profile restore`.
 
 The runtime changes only the JavaScript loaded in memory. It does not edit, copy, re-sign, or replace `/Applications/ChatGPT.app`. See [IAB architecture](./docs/IAB_ARCHITECTURE.md), [live test](./docs/IAB_LIVE_TEST.md), [verification evidence](./docs/IAB_VERIFICATION.md), and the [2026-08-18 Chrome session import incident report](./docs/INCIDENT_2026-08-18_CHROME_SESSION_IMPORT.md).
 

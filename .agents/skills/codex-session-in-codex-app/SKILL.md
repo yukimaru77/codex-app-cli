@@ -31,6 +31,6 @@ For ordinary operations, use the existing session ID and do not fork. Never copy
 
 When the user explicitly asks to fork a Codex CLI session and move that fork into Codex App, read and follow [references/fork-to-app.md](references/fork-to-app.md). This is one specialized workflow, not the default way to create or operate App sessions. Do not replace it with `codex-app new` or a prompt that merely mentions the parent ID.
 
-Browser profile setup and Browser tool verification are separate facts. A successful profile import or active runtime proves that Browser state is prepared; it does not prove a particular App turn called the in-app Browser. When Browser use itself must be verified, require a completed exact turn plus matching Browser tool output as described in the command guide.
+Browser profile selection is creation-time only: use `new --profile` or `recognize --profile`. Do not claim that `profile restart` can change an existing session. Browser profile setup and Browser tool verification are separate facts. A successful profile import or active runtime proves that Browser state is prepared; it does not prove a particular App turn called the in-app Browser. When Browser use itself must be verified, require a completed exact turn plus matching Browser tool output as described in the command guide.
 
 Use the normal signed App and shared session store. Do not launch alternate App user-data roots or modify the signed App bundle.

@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  finalizeCreatedSessionProfile,
   runProfileCommand,
 } from '../lib/profile-command.mjs';
 
@@ -313,11 +314,7 @@ export async function finalizeProfileForNewConversation({
   sourceProfile,
   options = {},
   env = process.env,
-  restartProfile = (from, target) => runProfileCommand('restart', {
-    from,
-    conversation: target,
-    replace: true,
-  }, env),
+  restartProfile = (from, target) => finalizeCreatedSessionProfile(from, target, env),
   waitForIpc = waitForAppIpcReady,
   openConversation = (target) => openDeepLink(threadDeepLink(target)),
 }) {

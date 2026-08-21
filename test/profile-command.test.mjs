@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,22 +7,14 @@ import test from 'node:test';
 
 import { seedBrowserProfiles } from '../iab/lib/profile-storage.mjs';
 import {
-  profileThreadIds,
   profileUsage,
   runProfileCommand,
 } from '../lib/profile-command.mjs';
 
 test('documents the integrated profile command surface', () => {
   assert.match(profileUsage(), /codex-app profile chrome-list/);
-  assert.match(profileUsage(), /--conversation <id>/);
   assert.match(profileUsage(), /chrome:Profile 1/);
-});
-
-test('accepts a conversation and repeated legacy thread selectors without duplicates', () => {
-  assert.deepEqual(profileThreadIds({
-    conversation: 'thread-a',
-    thread: ['thread-b', 'thread-a'],
-  }), ['thread-a', 'thread-b']);
+  assert.doesNotMatch(profileUsage(), /--conversation|--thread|--replace/);
 });
 
 test('lists embedded Codex browser profiles without spawning codex-iab-profile', (context) => {
@@ -63,11 +55,30 @@ test('lists Chrome profile selectors through the integrated CLI', (context) => {
   }]);
 });
 
-test('requires an explicit session target when replacing a profile', () => {
-  assert.throws(
-    () => runProfileCommand('restart', { replace: true }, {}),
-    /--replace requires --conversation or --thread/,
-  );
+test('rejects attempts to change an existing session profile', () => {
+  for (const options of [
+    { conversation: 'thread-a' },
+    { thread: 'thread-a' },
+    { replace: true },
+  ]) {
+    assert.throws(
+      () => runProfileCommand('restart', options, {}),
+      /cannot change the Browser profile of an existing session/,
+    );
+  }
+
+  const result = spawnSync(process.execPath, [
+    path.resolve('bin/codex-app.mjs'),
+    'profile',
+    'restart',
+    '--from',
+    'default',
+    '--conversation',
+    '01900000-0000-7000-8000-000000000001',
+    '--replace',
+  ], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /cannot change the Browser profile of an existing session/);
 });
 
 test('preserves initial-turn writes while isolating two same-source sessions and one other-source session', (context) => {

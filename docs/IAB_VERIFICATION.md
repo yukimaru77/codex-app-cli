@@ -74,13 +74,7 @@ session C: FIXED-NEW-PROFILE-C-20260813
 
 ## Chrome profileの標準importとsession seed
 
-`chrome-profiles` が列挙した表示名 `test`（directory `Profile 9`）を、未使用session IDへ実機importしました。
-
-```bash
-codex-app profile restart \
-  --from 'chrome:test' \
-  --thread '<unused-session-id>'
-```
+この実測は、`profile chrome-list` が列挙した表示名 `test`（directory `Profile 9`）を当時の内部session seed経路で未使用session IDへimportしたものです。既存sessionへ後付けする公開経路は現在サポートしていません。現行CLIでは `new --profile 'chrome:test'` または `recognize --profile 'chrome:test'` により作成時に選択します。
 
 App標準importerはChrome Cookie 77件を検出し、4件を新規import、73件を既存としてskip、失敗0件で完了しました。その後に作成した一意なsnapshotとsession専用profileの `Cookies` DBは、SHA-256と行数（1394）が一致しました。import前後でChrome側 `Cookies` と `Login Data` のmtime・size・inodeは一致し、Chrome Cookie行数も77のままでした。
 

@@ -107,13 +107,10 @@ Runtime and assignment operations change App runtime/profile state:
 ```bash
 codex-app profile restart --from default
 codex-app profile restart --from 'chrome:Profile 4'
-codex-app profile restart --from PROFILE_SELECTOR --conversation CONVERSATION_ID
-codex-app profile restart --from PROFILE_SELECTOR --conversation CONVERSATION_ID --replace
-codex-app profile restart --from PROFILE_SELECTOR --thread FIRST_ID --thread SECOND_ID
 codex-app profile restore
 ```
 
-Use one exact selector returned by the list commands. Close Chrome before importing a Chrome profile. Repeated `--thread` prepares multiple named sessions in one restart. `--replace` is explicit because it replaces existing per-session Browser storage after backing it up. `restore` returns to an ordinary unpatched App launch. Prefer `--profile` on `new` or `recognize` when profile assignment is part of creating that session; a global restart is not a substitute for assigning the intended session.
+Use one exact selector returned by the list commands. Close Chrome before importing a Chrome profile. `restart --from` selects the seed for sessions created afterward; it does not change an existing session's Browser profile. Choose the intended profile at creation with `new --profile` or `recognize --profile`. `restore` returns to an ordinary unpatched App launch.
 
 For ordinary existing-session Browser work, verify `profile status` reports an active runtime before sending. Profile preparation, Cookie import, and Browser execution are distinct: when the request requires proof that the in-app Browser works, send a non-mutating Browser task to the target conversation, wait for its exact turn, and verify matching tool output contains the resulting tab ID, URL, or title. An assistant assertion or `runtimeActive: true` alone is insufficient.
 

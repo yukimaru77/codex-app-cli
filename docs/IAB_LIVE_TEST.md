@@ -34,8 +34,8 @@ codex-app profile status
 4. Aへ戻り、保存操作なしでレポートを更新する。`THREAD-B` で上書きされず `THREAD-A` が残っていることを確認する。
 5. Aで新規in-app Browser tabを作り、persistent storeがA内で共有されることを確認する。
 6. `codex-app profile restart` 後にA/Bの両方を再確認し、それぞれのpersistent storeが独立して復元されることを確認する。
-7. `codex-app profile restart --from default --thread "$THREAD_A_ID"` を再実行し、既存A profileが上書きされず、保存済み状態が維持されることを確認する。
-8. 新しいthread Cへ `--from default` を指定し、共有profileのログイン状態を初期値として引き継いだ後、C側の変更が共有profileやA/Bへ反映されないことを確認する。
+7. `codex-app profile restart --from default` を再実行しても、既存A profileが変更されず保存済み状態が維持されることを確認する。
+8. `codex-app new --profile default` で新しいthread Cを作成し、共有profileのログイン状態を初期値として引き継いだ後、C側の変更が共有profileやA/Bへ反映されないことを確認する。
 9. A/Bのturnを同時に開始し、両方がin-app Browserで値を読み戻してもrouteとstoreが交差しないことを確認する。
 
 対象storeはCookie、serverが観測したCookie、Local Storage、Session Storage、IndexedDB、Cache Storage、Service Workerです。
