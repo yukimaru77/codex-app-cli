@@ -6,7 +6,7 @@ Use this workflow only when the user explicitly asks to fork a CLI session and m
 
 1. Record the source session ID, absolute workspace path, and the current session IDs in that workspace. When the user says "this/current session", use `CODEX_THREAD_ID` when present and verify that exact ID with `codex-app read`; do not guess from the latest session.
 2. Run `codex fork SOURCE_SESSION_ID -C WORKSPACE --no-alt-screen` with no prompt argument. Wait for `Thread forked from ...`, then exit the forked TUI without sending the worker instruction.
-3. Identify the one new fork session ID by comparing the workspace's session list before and after. Verify it with `codex-app read --conversation FORK_SESSION_ID --json`, and take `rolloutPath` from that output. Do not infer the ID from recency alone when more than one candidate exists.
+3. Identify the one new fork session ID by comparing the workspace's session list before and after. Verify it with `codex-app read --conversation FORK_SESSION_ID --json`, and copy `rolloutPath` exactly from that output. Do not synthesize the rollout filename or infer the ID from recency alone when more than one candidate exists.
 4. Migrate that exact fork rollout with `codex-app recognize`. Resolve a requested Chrome display name with `codex-app profile chrome-list`, require one exact match, and pass its selector here; do not guess a profile or globally restart one first as a substitute for migration.
 5. Take the App-facing child ID from `recognize` output field `threadId`. The fork source ID is a template and is not the final App conversation ID.
 6. Only after `recognize` succeeds, send the preserved worker instruction to the returned child ID with `codex-app send`.
@@ -33,6 +33,8 @@ codex-app send \
 ```
 
 Add `--model`, `--reasoning-effort`, or `--fast on|off` only when explicitly requested. `--profile` belongs on `recognize`; the post-migration `send` targets the already-profiled child.
+
+For general `recognize`, profile, settings, completion, and Browser verification semantics, use [command-guide.md](command-guide.md). Do not create another CLI fork merely because `recognize` reports that app-server startup needed more than one attempt; only a final failed `recognize` stops this workflow.
 
 ## Prohibited substitutions
 

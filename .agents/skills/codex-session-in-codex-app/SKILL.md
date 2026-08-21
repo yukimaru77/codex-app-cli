@@ -1,73 +1,36 @@
 ---
 name: codex-session-in-codex-app
-description: Open, inspect, continue, stop, rename, configure, migrate, and orchestrate Codex sessions in Codex App through the shared session store, live private IPC, and codex app-server. Use when given a thread/session ID, including requests to fork a current CLI session and move the fork into the App, open or read a session, send a follow-up, select model, reasoning effort, Fast mode, or Browser profile, relay a result, rename the chat, stop a turn, or verify the App-produced response.
+description: "Operate Codex App sessions with the codex-app CLI: discover and inspect sessions, create or continue conversations, wait for exact turns, configure model, effort, Fast mode, and Browser profiles, migrate rollouts, relay results, rename, stop, and diagnose local App connectivity. Use when a request names codex-app, a Codex thread/session ID, or moving work into Codex App."
 ---
 
-# Operate an existing Codex App session
+# Operate Codex App sessions
 
-Use `scripts/run.sh SESSION_ID /absolute/workspace/path 'prompt'` to verify, open, and optionally continue a session. Omit the prompt when only opening it.
+Use the installed `codex-app` command. Read [references/command-guide.md](references/command-guide.md) for the command and identifier needed by the requested operation; do not turn every request into a migration or Browser workflow.
 
-For direct operations, use the installed `codex-app` CLI:
+Choose the operation from the user's actual intent:
 
-```bash
-codex-app open --conversation SESSION_ID
-codex-app read --conversation SESSION_ID --json
-codex-app turn-status --conversation SESSION_ID
-codex-app rename --conversation SESSION_ID --name 'New chat name'
-codex-app stop --conversation SESSION_ID
-```
+- Discover or inspect: `status`, `list`, `read`, `turn-status`.
+- Open or manage an existing App session: `open`, `send`, `wait`, `rename`, `stop`.
+- Create an unrelated App-owned session: `new`.
+- Import an external rollout: `recognize`.
+- Configure in-app Browser state: `profile inspect|list|chrome-list|status|restart|restore` or `--profile` on `new`/`recognize`.
+- Observe low-level App events only when needed: `watch`.
+- Relay one completed worker result: `send --form` (`--from` is an alias).
 
-Create a new App-owned session with explicit settings when requested:
+Use `scripts/run.sh SESSION_ID /absolute/workspace/path 'prompt'` only as a convenience for the simple verify/open/optional-send case. Use direct commands when exact turn completion, settings, profiles, migration, or structured output matters.
 
-```bash
-codex-app new \
-  --cwd /absolute/workspace/path \
-  --profile 'chrome:<profile>' \
-  --model MODEL \
-  --reasoning-effort EFFORT \
-  --fast on \
-  --text 'prompt'
-```
+## Preserve identifiers and intent
 
-`--profile` accepts the selectors from `codex-app profile list` and `codex-app profile chrome-list`. The command waits for the initial turn, transfers its temporary Browser partition to a separate final session profile, restarts the App, and reopens the created session before returning.
+A conversation/thread ID identifies a session; a turn ID identifies one run inside it. Never pass one as the other. `send` can return an accepted `inProgress` turn; when completion matters, take that exact turn ID and use `wait`.
 
-`read` returns only the latest message by default. Add `--all-item` only when the complete message transcript is required.
+Pass `--model`, `--reasoning-effort`, `--fast on|off`, and `--profile` only when requested or required by the chosen operation. `--fast on` selects the priority service tier, `--fast off` clears it, and omission preserves the tier. A Fast-only change must not add model or effort overrides.
 
-## Fork a CLI session into the App
+For ordinary operations, use the existing session ID and do not fork. Never copy or edit installed rollout JSONL and never mutate `state_5.sqlite`. Use `--dry-run` where the command supports it when the user asks to preview or when validating a migration input before its live operation.
 
-When the user explicitly asks to fork a Codex CLI session and move that fork into Codex App, read and follow [references/fork-to-app.md](references/fork-to-app.md). This is a distinct workflow from creating an unrelated App session. Do not replace it with `codex-app new`, a prompt containing the parent session ID, or any other logical-fork approximation.
+## Specialized workflows
 
-## Send and relay results
+When the user explicitly asks to fork a Codex CLI session and move that fork into Codex App, read and follow [references/fork-to-app.md](references/fork-to-app.md). This is one specialized workflow, not the default way to create or operate App sessions. Do not replace it with `codex-app new` or a prompt that merely mentions the parent ID.
 
-Send an ordinary follow-up through the App's live IPC:
+Browser profile setup and Browser tool verification are separate facts. A successful profile import or active runtime proves that Browser state is prepared; it does not prove a particular App turn called the in-app Browser. When Browser use itself must be verified, require a completed exact turn plus matching Browser tool output as described in the command guide.
 
-```bash
-codex-app send \
-  --conversation WORKER_SESSION_ID \
-  --cwd /absolute/workspace/path \
-  --text 'prompt'
-```
-
-When requested, add `--model MODEL`, `--reasoning-effort EFFORT`, or `--fast on|off`. Pass only settings the user explicitly selected. `--fast on` selects the Fast (`priority`) service tier, `--fast off` clears it, and omitting `--fast` preserves the current tier. A Fast-only change must omit `--model` and `--reasoning-effort` so it does not change either setting. Verify `appliedThreadSettings` contains only the intended overrides.
-
-An accepted response with `status: inProgress` proves IPC acceptance, not completion. Verify the matching assistant response or use `turn-status` when completion matters.
-
-To return a worker result to an orchestrator session, use `--form` (`--from` is an alias):
-
-```bash
-codex-app send \
-  --conversation WORKER_SESSION_ID \
-  --text 'complete this task' \
-  --form ORCHESTRATOR_SESSION_ID \
-  --timeout 14400000
-```
-
-This waits for the exact worker turn to complete, selects that turn's final assistant message, and sends it to the orchestrator as a new user message. A successful command proves the worker completed and the orchestrator App handler accepted the relay; it does not prove the orchestrator's resulting turn completed. Do not manually resend after success. An aborted or timed-out worker turn is not relayed.
-
-## Session integrity
-
-For ordinary operations, use the existing session ID and do not fork. Fork only when the user explicitly requests a fork or migration. Never copy or edit an installed rollout and never mutate `state_5.sqlite`. `recognize` may reuse a source rollout already at its exact shared-store destination; it must never overwrite one.
-
-`turn-status` derives `idle`, `inProgress`, `completed`, or `aborted` from persisted rollout lifecycle events. Treat a stale `inProgress` as possible after an abnormal process exit.
-
-For work using the in-app Browser in multiple sessions, verify `codex-app profile status | jq -e '.runtimeActive == true'` before sending. If inactive, run `codex-app profile restart --from default` once and verify again. Use `codex-app profile chrome-list` and `codex-app profile restart --from 'chrome:<profile>'` when a Chrome seed is explicitly requested. Use the normal signed App and shared store; do not launch separate App user-data profiles.
+Use the normal signed App and shared session store. Do not launch alternate App user-data roots or modify the signed App bundle.
