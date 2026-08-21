@@ -1057,17 +1057,20 @@ export async function waitForTurnResult({
   subscribe,
   expectedTurnId,
   timeoutMs,
+  pollMs = 1_000,
 }) {
   if (!expectedTurnId) throw new Error('wait requires --turn <id>');
   let settled = false;
   let unsubscribe = () => {};
   let timer;
+  let poller;
 
   return new Promise((resolve, reject) => {
     const finish = (callback, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearInterval(poller);
       unsubscribe();
       callback(value);
     };
@@ -1102,9 +1105,11 @@ export async function waitForTurnResult({
     };
 
     timer = setTimeout(() => {
-      finish(reject, new Error(`turn completion timed out after ${timeoutMs}ms: ${expectedTurnId}`));
+      inspect();
+      if (!settled) finish(reject, new Error(`turn completion timed out after ${timeoutMs}ms: ${expectedTurnId}`));
     }, timeoutMs);
     unsubscribe = subscribe(inspect);
+    poller = setInterval(inspect, pollMs);
     inspect();
   });
 }

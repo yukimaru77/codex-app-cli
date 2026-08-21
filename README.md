@@ -107,7 +107,7 @@ codex-app rename --conversation '<thread-id>' --name 'New chat name'
 
 `turn-status` reports `idle`, `inProgress`, `completed`, or `aborted` from the latest lifecycle event in the rollout.
 
-`wait` subscribes to rollout file changes without polling. It ignores other turns and emits one JSON result after the requested turn completes. An aborted turn, missing final assistant response, or timeout exits with an error.
+`wait` subscribes to rollout file changes and periodically rechecks the persisted rollout so a missed filesystem notification cannot strand the waiter. It ignores other turns and emits one JSON result after the requested turn completes. An aborted turn, missing final assistant response, or timeout exits with an error.
 
 `read` returns only the latest message by default. Add `--all-item` to return the full message transcript.
 

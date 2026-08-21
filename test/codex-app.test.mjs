@@ -558,6 +558,46 @@ test('waits for an exact turn using change notifications and returns its final r
   assert.equal(unsubscribed, true);
 });
 
+test('waits for an exact turn when the rollout change notification is missed', async () => {
+  const records = [];
+  let unsubscribed = false;
+  const completion = waitForTurnResult({
+    readRecords: () => records,
+    subscribe: () => () => { unsubscribed = true; },
+    expectedTurnId: 'target-turn',
+    timeoutMs: 100,
+    pollMs: 1,
+  });
+  records.push(
+    { timestamp: 'final-message', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }], internal_chat_message_metadata_passthrough: { turn_id: 'target-turn' } } },
+    { timestamp: 'completed', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'target-turn' } },
+  );
+  assert.deepEqual(await completion, {
+    status: 'completed',
+    turnId: 'target-turn',
+    completedAt: 'completed',
+    message: { timestamp: 'final-message', role: 'assistant', text: 'done' },
+  });
+  assert.equal(unsubscribed, true);
+});
+
+test('checks the persisted turn one last time before timing out', async () => {
+  const completedRecords = [
+    { timestamp: 'final-message', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }], internal_chat_message_metadata_passthrough: { turn_id: 'target-turn' } } },
+    { timestamp: 'completed', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'target-turn' } },
+  ];
+  let reads = 0;
+  const completion = await waitForTurnResult({
+    readRecords: () => (++reads === 1 ? [] : completedRecords),
+    subscribe: () => () => {},
+    expectedTurnId: 'target-turn',
+    timeoutMs: 5,
+    pollMs: 1_000,
+  });
+  assert.equal(completion.status, 'completed');
+  assert.equal(reads, 2);
+});
+
 test('watch waits for the next turn and emits only its final result', async () => {
   const records = [{ ordinal: 0, type: 'session_meta', payload: {} }];
   let notify;
