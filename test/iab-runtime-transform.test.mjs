@@ -69,13 +69,10 @@ test("installed App main bundle matches the runtime patch", () => {
   assert.equal(transformMainBundle(source).changed, true);
 });
 
-test("installed App renderer settings patch fail-closes on the current bundle", () => {
+test("installed App renderer bundle matches the settings patch", () => {
   const asarPath = appAsarPath("/Applications/ChatGPT.app");
   const source = extractText(asarPath, findRendererBundle(asarPath));
-  assert.throws(
-    () => transformRendererBundle(source),
-    /does not match this App build/,
-  );
+  assert.deepEqual(transformRendererBundle(source).occurrences, [1, 1, 1, 1]);
 });
 
 test("persists forwarded thread settings from the auxiliary main-process chunk", () => {
