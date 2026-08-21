@@ -23,6 +23,10 @@ Use `scripts/run.sh SESSION_ID /absolute/workspace/path 'prompt'` only as a conv
 
 A conversation/thread ID identifies a session; a turn ID identifies one run inside it. Never pass one as the other. `send` can return an accepted `inProgress` turn; when completion matters, take that exact turn ID and use `wait`.
 
+`new`, `recognize`, and `send` deliberately use `danger-full-access` with approval policy `never`. `send` overrides a restricted or approval-gated existing session before starting its turn. Treat prompts and target sessions as trusted; do not claim that model, effort, Fast mode, or prompt wording controls permissions.
+
+`send` serializes the Desktop ownership-sensitive portion across CLI processes, ensures the in-app Browser runtime is active, discovers the exact Desktop owner client, and loads complete history before starting the turn. Parallel callers may wait briefly for this lock, but their accepted turns then run concurrently. Do not replace this with parallel `open` plus raw IPC calls or send the instruction before the KB bootstrap turn has completed.
+
 Pass `--model`, `--reasoning-effort`, `--fast on|off`, and `--profile` only when requested or required by the chosen operation. `--fast on` selects the priority service tier, `--fast off` clears it, and omission preserves the tier. A Fast-only change must not add model or effort overrides.
 
 For ordinary operations, use the existing session ID and do not fork. Never copy or edit installed rollout JSONL and never mutate `state_5.sqlite`. Use `--dry-run` where the command supports it when the user asks to preview or when validating a migration input before its live operation.

@@ -12,7 +12,7 @@ It can:
 - import an externally created rollout, fork it into a normal App conversation, and open it.
 
 > [!WARNING]
-> This is not an OpenAI-supported or stable API. It uses private Desktop App IPC methods, local implementation details, deep links, and macOS Accessibility automation. An App update can change or remove any of them.
+> This is not an OpenAI-supported or stable API. It uses private Desktop App IPC methods, local implementation details, and deep links. An App update can change or remove any of them.
 
 ## Requirements
 
@@ -21,7 +21,6 @@ It can:
 - Node.js 20 or later
 - `sqlite3` on `PATH`
 - the `codex` CLI on `PATH` when using `recognize`
-- Accessibility permission for the terminal application that invokes `codex-app new`
 
 ## Install
 
@@ -53,7 +52,7 @@ ln -s "$PWD/.agents/skills/codex-session-in-codex-app" \
 | `list` | `~/.codex/state_5.sqlite` | List locally stored conversations. |
 | `read` | state database + rollout JSONL | Print a conversation transcript. |
 | `open` | state database + `codex://` deep link | Open an existing conversation in the App. |
-| `new` | `codex://threads/new` + Accessibility Return key | Create an App-owned conversation and submit its first prompt. |
+| `new` | `codex app-server` + deep link | Create a full-access App-owned conversation and submit its first prompt. |
 | `send` | deep link + private App IPC | Send a follow-up through the live App handler. |
 | `stop` | deep link + private App IPC | Interrupt the active turn. |
 | `watch` | private App IPC | Stream matching App IPC broadcasts. |
@@ -124,7 +123,7 @@ codex-app new \
   --text 'Find the failing tests and fix them.'
 ```
 
-`--model`, `--reasoning-effort`, and `--fast on|off` are applied when the session is created and synchronized to the Desktop composer's complete thread settings after the first turn. `--fast on` selects the Fast (`priority`) service tier; `--fast off` explicitly returns to the standard tier. Omitting `--fast` keeps the existing/default tier. The command ensures the in-memory App runtime is active first; this runtime also fixes a Desktop state race that could leave the composer displaying the previous effort even though the turn ran with the requested effort. The signed App bundle is not modified. The same options are supported by `recognize`, including its bootstrap turn and imported Desktop thread.
+`new` creates the session and its first turn with `sandbox: danger-full-access` and `approvalPolicy: never`. `--model`, `--reasoning-effort`, and `--fast on|off` are applied when the session is created and synchronized to the Desktop composer's complete thread settings after the first turn. `--fast on` selects the Fast (`priority`) service tier; `--fast off` explicitly returns to the standard tier. Omitting `--fast` keeps the existing/default tier. The command ensures the in-memory App runtime is active when those settings or a Browser profile are requested. The signed App bundle is not modified. The same options are supported by `recognize`, including its bootstrap turn and imported Desktop thread.
 
 Add `--profile` to select the initial in-app Browser profile for the new session. It accepts the same values as `codex-app profile restart --from`, including Chrome directory and display-name selectors.
 
@@ -137,11 +136,9 @@ codex-app new \
   --text 'Open the product and verify the signed-in flow.'
 ```
 
-With `--profile`, `new` starts the profile runtime before opening the composer and waits for the initial turn to finish. It then stops the App so Chromium flushes the temporary new-thread partition, copies that partition to the final session-ID profile, restarts the App, and reopens the session before returning. This preserves Browser changes made during the initial turn. Two sessions created from the same source receive separate copies; choosing a different source produces another separate copy.
+With `--profile`, `new` starts the profile runtime before the initial turn. It then stops the App so Chromium flushes the selected seed, copies it to the final session-ID profile, restarts the App, and reopens the session before returning. Two sessions created from the same source receive separate copies; choosing a different source produces another separate copy.
 
-`new` opens a prefilled App deep link, activates the App, waits four seconds, presses Return through macOS Accessibility, and then waits for a new local thread record. It does not send `start-conversation` over IPC.
-
-Grant Accessibility permission to the terminal host you use to run the command under **System Settings → Privacy & Security → Accessibility**. Use `--dry-run` to inspect the deep link without opening the App or pressing a key:
+Use `--dry-run` to inspect the App Server creation request without creating a session:
 
 ```bash
 codex-app new --cwd "$PWD" --text 'Hello' --profile default --dry-run
@@ -164,7 +161,11 @@ codex-app watch --conversation '<thread-id>'
 
 `watch` waits up to four hours by default so long-running browser E2E turns do not silently lose their result monitor. Use `--timeout <ms>` only when a different bound is intentional.
 
-When `--model`, `--reasoning-effort`, or `--fast` is specified, `send` first updates the conversation's complete thread settings and then starts the turn. `--fast on` enables Fast mode and `--fast off` disables it without changing the model or reasoning effort; omitting the option leaves the tier unchanged. `send` and `stop` first open the target thread so that the live Desktop handler owns it, then use private App IPC. Add `--dry-run` to print the request without sending it.
+`send` always updates the target conversation to `danger-full-access` with approval policy `never`, and also puts those values directly on the turn request. This applies even when the existing conversation was previously restricted or approval-gated. Before starting the turn, it asks the owning Desktop view to load the complete conversation history. This keeps KB bootstrap turns, model changes, and the new instruction in ordinal order in the App UI.
+
+Desktop ownership changes are serialized across `codex-app` processes with an inter-process lock. Only the short `ensure App runtime → open → discover the exact thread owner → load complete history → update settings → start turn` section is locked; turns continue running concurrently after acceptance. All follower requests target the discovered Desktop client instead of an arbitrary App window. A lock left by an exited process is recovered automatically. `stop` and Desktop settings synchronization use the same lock.
+
+When `--model`, `--reasoning-effort`, or `--fast` is specified, those settings are updated with the permissions before the turn starts. `--fast on` enables Fast mode and `--fast off` disables it without changing the model or reasoning effort; omitting the option leaves the tier unchanged. Add `--dry-run` to print the serialized request sequence without sending it.
 
 ### Import an external rollout
 
@@ -196,7 +197,7 @@ codex-app recognize \
 The command validates the filename, both session IDs in `session_meta`, every JSONL record, and the complete `ordinal` sequence. It installs the file with mode `0600` under `$CODEX_HOME/sessions/YYYY/MM/DD/` (or `~/.codex/sessions/...`) and refuses to overwrite an existing file. It then forks a persistent user thread, completes a bootstrap turn, runs the optional instruction as a separate turn, names the thread, verifies it with `thread/read`, shuts down app-server, and opens the child thread in the App.
 
 > [!CAUTION]
-> `recognize` deliberately creates the fork with `sandbox: danger-full-access` and `approvalPolicy: never`, matching the workflow this tool was built to import. Only use trusted rollout files and trusted workspaces. Run `--dry-run` first. The copied rollout is not automatically removed if a later app-server step fails.
+> `new`, `recognize`, and every `send` deliberately run with `sandbox: danger-full-access` and `approvalPolicy: never`. Only use trusted prompts, sessions, rollout files, and workspaces. Run `--dry-run` first when inspection is needed. A copied rollout is not automatically removed if a later app-server step fails.
 
 See [APP_SESSION_RECOGNITION.md](./APP_SESSION_RECOGNITION.md) for the protocol sequence and success criteria.
 

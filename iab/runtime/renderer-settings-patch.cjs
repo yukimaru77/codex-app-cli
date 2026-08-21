@@ -1,24 +1,44 @@
-const SETTINGS_GUARDS = [
-  "this.getConversation(e)?.latestThreadSettings===i&&this.updateConversationState(e,e=>{Aat(e,t)})",
-  "this.getConversation(e)?.latestThreadSettings===a&&this.updateConversationState(e,e=>{Aat(e,t)})",
+const SETTINGS_GUARD_VARIANTS = [
+  [
+    "this.getConversation(e)?.latestThreadSettings===i&&this.updateConversationState(e,e=>{Aat(e,t)})",
+    "this.getConversation(e)?.latestThreadSettings===i&&this.updateConversationState(e,e=>{Fat(e,t)})",
+  ],
+  [
+    "this.getConversation(e)?.latestThreadSettings===a&&this.updateConversationState(e,e=>{Aat(e,t)})",
+    "this.getConversation(e)?.latestThreadSettings===a&&this.updateConversationState(e,e=>{Fat(e,t)})",
+  ],
 ];
 const SETTINGS_METHOD_PREFIX = "async updateThreadSettingsForNextTurn(e,t){let n=";
-const SETTINGS_METHOD_PREFIX_REPLACEMENT =
-  "async updateThreadSettingsForNextTurn(e,t){try{localStorage.setItem(`codex-app-cli-thread-settings:${e}`,JSON.stringify(t))}catch{}this.updateConversationState(e,e=>{Aat(e,t)});let n=";
-const COMPOSER_SETTINGS_SOURCE =
-  "let v=ZVc(_),{modelSettings:y,selectComposerModelAndReasoningEffort:b,setModelAndReasoningEffort:x}=v,S;";
+const COMPOSER_SETTINGS_SOURCES = [
+  "let v=ZVc(_),{modelSettings:y,selectComposerModelAndReasoningEffort:b,setModelAndReasoningEffort:x}=v,S;",
+  "let v=eUc(_),{modelSettings:y,selectComposerModelAndReasoningEffort:b,setModelAndReasoningEffort:x}=v,S;",
+];
 const COMPOSER_SETTINGS_REPLACEMENT =
-  "let v=ZVc(_),{modelSettings:y,selectComposerModelAndReasoningEffort:b,setModelAndReasoningEffort:x}=v,S;y=(()=>{try{let e=JSON.parse(localStorage.getItem(`codex-app-cli-thread-settings:${n}`)),t=e?.effort===`max`?`xhigh`:e?.effort;return e?{...y,model:e.model??y.model,reasoningEffort:t??y.reasoningEffort}:y}catch{return y}})();";
+  (source) => source + "y=(()=>{try{let e=JSON.parse(localStorage.getItem(`codex-app-cli-thread-settings:${n}`)),t=e?.effort===`max`?`xhigh`:e?.effort;return e?{...y,model:e.model??y.model,reasoningEffort:t??y.reasoningEffort}:y}catch{return y}})();";
+const LOAD_COMPLETE_HISTORY_PREFIX = "case`thread-follower-load-complete-history`:{let n=";
+const LOAD_COMPLETE_HISTORY_PREFIX_REPLACEMENT =
+  "case`thread-follower-load-complete-history`:{let u=e.getStreamRole(t.params.conversationId);u?.role===`follower`&&e.markConversationNeedsResumeForUnavailableOwner(t.params.conversationId,u.ownerClientId);await e.resumeConversationForUnavailableOwner({conversationId:t.params.conversationId,model:null,reasoningEffort:null,serviceTier:null,workspaceRoots:[e.getConversationCwd(t.params.conversationId)??`/`],collaborationMode:e.getConversation(t.params.conversationId)?.latestCollaborationMode??null});let n=";
+const LOAD_COMPLETE_HISTORY_NULL_GUARD =
+  "if(o==null)throw Error(`no-client-found: thread stream owner became unavailable`);return{method:t.method,result:{revision:o}}";
+const LOAD_COMPLETE_HISTORY_NULL_GUARD_REPLACEMENT =
+  "o??=e.getConversationStreamRevision(t.params.conversationId)??0;return{method:t.method,result:{revision:o}}";
 
 function countOccurrences(source, needle) {
   return source.split(needle).length - 1;
 }
 
 function transformRendererBundle(source) {
+  const settingsGuards = SETTINGS_GUARD_VARIANTS.map((variants) => {
+    const matches = variants.filter((needle) => countOccurrences(source, needle) === 1);
+    return matches.length === 1 ? matches[0] : null;
+  });
+  const composerSources = COMPOSER_SETTINGS_SOURCES.filter((needle) => countOccurrences(source, needle) === 1);
   const occurrences = [
     countOccurrences(source, SETTINGS_METHOD_PREFIX),
-    ...SETTINGS_GUARDS.map((needle) => countOccurrences(source, needle)),
-    countOccurrences(source, COMPOSER_SETTINGS_SOURCE),
+    ...settingsGuards.map((needle) => needle == null ? 0 : 1),
+    composerSources.length,
+    countOccurrences(source, LOAD_COMPLETE_HISTORY_PREFIX),
+    countOccurrences(source, LOAD_COMPLETE_HISTORY_NULL_GUARD),
   ];
   if (occurrences.some((count) => count !== 1)) {
     throw new Error(
@@ -27,15 +47,25 @@ function transformRendererBundle(source) {
   }
   let transformed = source.replace(
     SETTINGS_METHOD_PREFIX,
-    SETTINGS_METHOD_PREFIX_REPLACEMENT,
+    "async updateThreadSettingsForNextTurn(e,t){try{localStorage.setItem(`codex-app-cli-thread-settings:${e}`,JSON.stringify(t))}catch{}"
+      + settingsGuards[0].slice(settingsGuards[0].indexOf("this.updateConversationState"))
+      + ";let n=",
   );
-  for (const needle of SETTINGS_GUARDS) {
+  for (const needle of settingsGuards) {
     const replacement = needle.slice(needle.indexOf("this.updateConversationState"));
     transformed = transformed.replace(needle, replacement);
   }
   transformed = transformed.replace(
-    COMPOSER_SETTINGS_SOURCE,
-    COMPOSER_SETTINGS_REPLACEMENT,
+    composerSources[0],
+    COMPOSER_SETTINGS_REPLACEMENT(composerSources[0]),
+  );
+  transformed = transformed.replace(
+    LOAD_COMPLETE_HISTORY_PREFIX,
+    LOAD_COMPLETE_HISTORY_PREFIX_REPLACEMENT,
+  );
+  transformed = transformed.replace(
+    LOAD_COMPLETE_HISTORY_NULL_GUARD,
+    LOAD_COMPLETE_HISTORY_NULL_GUARD_REPLACEMENT,
   );
   return { source: transformed, occurrences };
 }

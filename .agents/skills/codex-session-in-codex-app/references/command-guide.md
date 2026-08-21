@@ -39,6 +39,10 @@ codex-app stop --conversation CONVERSATION_ID
 
 Use `open` only to show an existing session. Use `send` to continue it. If the result matters, extract the exact returned turn ID and run `wait`; do not substitute a later `turn-status` for exact-turn attribution. `stop` targets the active turn and `rename` verifies the persisted name.
 
+Every `send` first persists `sandbox: danger-full-access` and `approvalPolicy: never`, and repeats those values on the exact turn request. This intentionally overrides an existing session created with `on-request`, read-only, or managed permissions. A prompt saying that work is pre-approved does not change permissions; the CLI request does.
+
+The CLI serializes `ensure App runtime → open → discover exact owner → load complete history → update settings → start turn` across processes. Complete-history loading must finish before the new user instruction is accepted, so a KB bootstrap turn and model-switch context remain before the follow-up in App display order. Requests are targeted to the discovered Desktop client, not whichever window happens to answer first. The lock is released immediately after acceptance; workers themselves still run concurrently.
+
 Add settings only when intended:
 
 ```bash
@@ -67,7 +71,7 @@ codex-app new \
   --profile PROFILE_SELECTOR
 ```
 
-All settings are optional. With `--profile`, the command prepares isolated Browser state for the resulting session and preserves Browser changes from the initial turn. `new` is not a replacement for importing or forking existing conversation context. It uses the App composer and requires macOS Accessibility permission for the invoking terminal. Use `--dry-run` to preview without submitting.
+All settings are optional. `new` always creates the session and first turn with `sandbox: danger-full-access` and `approvalPolicy: never`. With `--profile`, the command prepares isolated Browser state for the resulting session. `new` is not a replacement for importing or forking existing conversation context. Use `--dry-run` to preview without submitting.
 
 ## Recognize external rollouts
 
@@ -89,7 +93,7 @@ Then omit `--dry-run` for the live import. `--model`, `--reasoning-effort`, `--f
 
 An input rollout already at its exact shared-store destination is valid and dry-run reports `rollout.action: "reuse"`. A different existing destination fails closed. `recognize` makes a bounded retry for transient SQLite state-runtime startup failures and reports `appServerStartAttempts`; it does not retry the fork operation itself.
 
-`recognize` creates its child with `sandbox: danger-full-access` and `approvalPolicy: never`. Use it only with a trusted rollout and workspace, validate with `--dry-run` first, and do not treat migration as permission for unrelated external changes.
+`recognize` creates its child and bootstrap turn with `sandbox: danger-full-access` and `approvalPolicy: never`. Use it only with a trusted rollout and workspace, validate with `--dry-run` first, and do not treat migration as permission for unrelated external changes.
 
 When the user specifically wants a CLI session forked and migrated, follow [fork-to-app.md](fork-to-app.md), which defines the required ordering and prohibits logical-fork substitutions.
 
@@ -116,7 +120,7 @@ Use one exact selector returned by the list commands. Close Chrome before import
 
 `profile restart`, `profile restore`, and profile-bearing `new` or `recognize` may restart the shared signed App. They are disruptive operations, not ordinary setup. First inspect `profile status`; if the compatible runtime is already active and no profile change was requested, preserve it and omit profile mutation. Otherwise obtain explicit user confirmation immediately before the operation.
 
-For ordinary existing-session Browser work, verify `profile status` reports an active runtime before sending. Profile preparation, Cookie import, and Browser execution are distinct: when the request requires proof that the in-app Browser works, send a non-mutating Browser task to the target conversation, wait for its exact turn, and verify matching tool output contains the resulting tab ID, URL, or title. An assistant assertion or `runtimeActive: true` alone is insufficient.
+For ordinary existing-session Browser work, `send` verifies the compatible runtime and starts it with the existing/default seed when it is absent or outdated. Profile preparation, Cookie import, and Browser execution are distinct: when the request requires proof that the in-app Browser works, send a non-mutating Browser task to the target conversation, wait for its exact turn, and verify matching tool output contains the resulting tab ID, URL, or title. An assistant assertion or `runtimeActive: true` alone is insufficient.
 
 ## Relay a completed worker result
 

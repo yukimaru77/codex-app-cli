@@ -21,6 +21,9 @@ const TEMPORARY_NEW_CONVERSATION_PROFILE_PREFIX = 'codex-browser-client-new-thre
 const DEFAULT_BOOTSTRAP_TEXT = 'Use the imported conversation context when answering future requests.';
 const DEFAULT_FOLLOWER_MODEL = 'gpt-5.6-luna';
 const DEFAULT_FOLLOWER_REASONING_EFFORT = 'max';
+const YOLO_APPROVAL_POLICY = 'never';
+const YOLO_SANDBOX = 'danger-full-access';
+const YOLO_SANDBOX_POLICY = { type: 'dangerFullAccess' };
 const VERSION_BY_METHOD = new Map([
   ['thread-owner-discovery', 1],
   ['thread-follower-start-turn', 2],
@@ -223,6 +226,81 @@ async function delay(milliseconds) {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function processIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code !== 'ESRCH';
+  }
+}
+
+export async function acquireDesktopOperationLock({
+  lockPath = path.join(codexHome(), 'codex-app-cli', 'desktop-operation.lock'),
+  timeoutMs = DEFAULT_TURN_TIMEOUT_MS,
+  retryMs = 50,
+  pid = process.pid,
+  token = randomUUID(),
+  isProcessAlive = processIsAlive,
+} = {}) {
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + timeoutMs;
+  do {
+    try {
+      const descriptor = fs.openSync(lockPath, 'wx', 0o600);
+      try {
+        fs.writeFileSync(descriptor, JSON.stringify({ pid, token, createdAt: new Date().toISOString() }), 'utf8');
+      } finally {
+        fs.closeSync(descriptor);
+      }
+      return () => {
+        try {
+          const owner = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+          if (owner.token === token) fs.unlinkSync(lockPath);
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+        }
+      };
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+
+    let stale = false;
+    try {
+      const owner = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+      stale = Number.isInteger(owner.pid) && !isProcessAlive(owner.pid);
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      const ageMs = Date.now() - fs.statSync(lockPath).mtimeMs;
+      stale = ageMs >= DEFAULT_TURN_TIMEOUT_MS;
+    }
+    if (stale) {
+      const stalePath = `${lockPath}.stale-${token}`;
+      try {
+        fs.renameSync(lockPath, stalePath);
+        fs.unlinkSync(stalePath);
+        continue;
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`desktop operation lock timed out after ${timeoutMs}ms: ${lockPath}`);
+    }
+    await delay(Math.min(retryMs, Math.max(1, deadline - Date.now())));
+  } while (Date.now() < deadline);
+  throw new Error(`desktop operation lock timed out after ${timeoutMs}ms: ${lockPath}`);
+}
+
+async function withDesktopOperationLock(callback, options) {
+  const release = await acquireDesktopOperationLock(options);
+  try {
+    return await callback();
+  } finally {
+    release();
+  }
+}
+
 export async function waitForAppIpcReady({
   timeoutMs = DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS,
   retryMs = 100,
@@ -350,7 +428,10 @@ async function requestWhenHandlerReady(
       timeoutMs: requestTimeoutMs,
     });
     if (response?.resultType === 'success') return response;
-    if (response?.error !== 'no-client-found') {
+    const ownerTransitioning = response?.error === 'no-client-found'
+      || response?.error === 'The target app window is not ready'
+      || response?.error?.endsWith('thread stream owner became unavailable');
+    if (!ownerTransitioning) {
       assertSuccess(response, method);
     }
     if (Date.now() >= deadline) {
@@ -359,6 +440,88 @@ async function requestWhenHandlerReady(
     await delay(Math.min(250, Math.max(1, deadline - Date.now())));
   } while (Date.now() < deadline);
   throw new Error(`${method} handler did not become ready on desktop client ${targetClientId}`);
+}
+
+export async function loadCompleteHistory(client, conversationId, requestOptions) {
+  const response = await requestWhenHandlerReady(client, 'thread-follower-load-complete-history', {
+    conversationId,
+  }, requestOptions);
+  assertSuccess(response, 'thread-follower-load-complete-history');
+  return response;
+}
+
+export async function discoverThreadOwner(client, conversationId, {
+  hostId = 'local',
+  timeoutMs = DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS,
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  do {
+    const remainingMs = Math.max(1, deadline - Date.now());
+    try {
+      const response = await client.request('thread-owner-discovery', {
+        hostId,
+        conversationId,
+      }, { timeoutMs: Math.min(2_000, remainingMs) });
+      if (response?.resultType === 'success'
+          && typeof response.handledByClientId === 'string'
+          && response.handledByClientId.length > 0) {
+        return response.handledByClientId;
+      }
+      if (response?.error !== 'no-client-found') assertSuccess(response, 'thread-owner-discovery');
+      lastError = new Error(response?.error ?? `thread owner was not discovered: ${conversationId}`);
+    } catch (error) {
+      lastError = error;
+    }
+    if (Date.now() >= deadline) break;
+    await delay(Math.min(250, Math.max(1, deadline - Date.now())));
+  } while (Date.now() < deadline);
+  throw new Error(`thread owner was not discovered before timeout: ${conversationId}: ${lastError?.message ?? 'unknown error'}`);
+}
+
+async function startDesktopTurn({ conversationId, params, threadSettings, options, clientType }) {
+  const readinessTimeoutMs = options.timeout == null
+    ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS
+    : timeoutFrom(options);
+  const requestTimeoutMs = options.timeout == null
+    ? DEFAULT_TURN_TIMEOUT_MS
+    : timeoutFrom(options);
+  return withDesktopOperationLock(async () => {
+    const settingsRuntime = await ensureSettingsRuntime(null, { options });
+    const client = new CodexAppClient({
+      socketPath: options.socket ?? findSocketPath(),
+      timeoutMs: timeoutFrom(options),
+      clientType,
+    });
+    openDeepLink(threadDeepLink(conversationId), { background: true });
+    await delay(750);
+    await client.connect();
+    try {
+      const targetClientId = options['target-client'] ?? await discoverThreadOwner(client, conversationId, {
+        timeoutMs: readinessTimeoutMs,
+      });
+      const requestOptions = {
+        targetClientId,
+        readinessTimeoutMs,
+        requestTimeoutMs,
+      };
+      const historyResponse = await loadCompleteHistory(client, conversationId, requestOptions);
+      let appliedThreadSettings = null;
+      if (threadSettings) {
+        const settingsResponse = await requestWhenHandlerReady(client, 'thread-follower-update-thread-settings', {
+          conversationId,
+          threadSettings,
+        }, requestOptions);
+        assertSuccess(settingsResponse, 'thread-follower-update-thread-settings');
+        appliedThreadSettings = threadSettings;
+      }
+      const response = await requestWhenHandlerReady(client, 'thread-follower-start-turn', params, requestOptions);
+      assertSuccess(response, 'thread-follower-start-turn');
+      return { response, historyResponse, appliedThreadSettings, settingsRuntime };
+    } finally {
+      client.close();
+    }
+  }, { timeoutMs: requestTimeoutMs });
 }
 
 export class AppServerClient {
@@ -664,6 +827,8 @@ async function runAppServerTurn(client, threadId, cwd, text, timeoutMs, { model,
       threadId,
       cwd,
       input: [{ type: 'text', text }],
+      approvalPolicy: YOLO_APPROVAL_POLICY,
+      sandboxPolicy: YOLO_SANDBOX_POLICY,
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
       ...(serviceTier !== undefined ? { serviceTier } : {}),
@@ -700,8 +865,8 @@ export async function recognizeSession({
     threadId: templateSessionId,
     cwd: absoluteCwd,
     ephemeral: false,
-    sandbox: 'danger-full-access',
-    approvalPolicy: 'never',
+    sandbox: YOLO_SANDBOX,
+    approvalPolicy: YOLO_APPROVAL_POLICY,
     threadSource: 'user',
     ...(model ? { model } : {}),
     ...(reasoningEffort ? { config: { model_reasoning_effort: reasoningEffort } } : {}),
@@ -732,6 +897,8 @@ export async function createSession({ cwd, text, model, reasoningEffort, service
     cwd: absoluteCwd,
     ephemeral: false,
     threadSource: 'user',
+    sandbox: YOLO_SANDBOX,
+    approvalPolicy: YOLO_APPROVAL_POLICY,
     ...(model ? { model } : {}),
     ...(reasoningEffort ? { config: { model_reasoning_effort: reasoningEffort } } : {}),
     ...(serviceTier !== undefined ? { serviceTier } : {}),
@@ -750,27 +917,35 @@ export async function createSession({ cwd, text, model, reasoningEffort, service
 
 async function syncDesktopThreadSettings(conversationId, options, timeoutMs) {
   const threadSettings = buildThreadSettings(options);
-  if (!threadSettings) return null;
-  const client = new CodexAppClient({
-    socketPath: options.socket ?? findSocketPath(),
-    timeoutMs,
-    clientType: 'codex-app-cli-new-settings-sync',
-  });
-  await client.connect();
-  try {
-    const response = await requestWhenHandlerReady(client, 'thread-follower-update-thread-settings', {
-      conversationId,
-      threadSettings,
-    }, {
-      targetClientId: options['target-client'],
-      readinessTimeoutMs: timeoutMs,
-      requestTimeoutMs: timeoutMs,
+  return withDesktopOperationLock(async () => {
+    const client = new CodexAppClient({
+      socketPath: options.socket ?? findSocketPath(),
+      timeoutMs,
+      clientType: 'codex-app-cli-new-settings-sync',
     });
-    assertSuccess(response, 'thread-follower-update-thread-settings');
-    return threadSettings;
-  } finally {
-    client.close();
-  }
+    openDeepLink(threadDeepLink(conversationId), { background: true });
+    await delay(750);
+    await client.connect();
+    try {
+      const targetClientId = options['target-client'] ?? await discoverThreadOwner(client, conversationId, {
+        timeoutMs,
+      });
+      const requestOptions = {
+        targetClientId,
+        readinessTimeoutMs: timeoutMs,
+        requestTimeoutMs: timeoutMs,
+      };
+      await loadCompleteHistory(client, conversationId, requestOptions);
+      const response = await requestWhenHandlerReady(client, 'thread-follower-update-thread-settings', {
+        conversationId,
+        threadSettings,
+      }, requestOptions);
+      assertSuccess(response, 'thread-follower-update-thread-settings');
+      return threadSettings;
+    } finally {
+      client.close();
+    }
+  }, { timeoutMs });
 }
 
 function assertSuccess(response, method) {
@@ -840,6 +1015,8 @@ export function buildStartTurnParams(options) {
     clientUserMessageId: options['client-user-message-id'] ?? randomUUID(),
     input: [{ type: 'text', text, text_elements: [] }],
     attachments: [],
+    approvalPolicy: YOLO_APPROVAL_POLICY,
+    sandboxPolicy: YOLO_SANDBOX_POLICY,
   };
   if (options.cwd) params.cwd = path.resolve(options.cwd);
   if (options.model) params.model = options.model;
@@ -880,7 +1057,12 @@ export function resolveFollowerTurnOptions(options) {
 }
 
 export function buildThreadSettings(options) {
-  const settings = {};
+  const settings = {
+    approvalPolicy: YOLO_APPROVAL_POLICY,
+    approvalsReviewer: 'user',
+    sandboxPolicy: YOLO_SANDBOX_POLICY,
+    permissions: null,
+  };
   if (options.model) settings.model = options.model;
   if (options['reasoning-effort']) settings.effort = options['reasoning-effort'];
   const serviceTier = serviceTierFromFast(options.fast);
@@ -895,7 +1077,7 @@ export function buildThreadSettings(options) {
       },
     };
   }
-  return Object.keys(settings).length === 0 ? null : settings;
+  return settings;
 }
 
 function printJson(value) {
@@ -1503,139 +1685,73 @@ async function run(argv) {
   if (command === 'new') {
     const params = buildNewThreadParams(options);
     const serviceTier = serviceTierFromFast(options.fast);
-    if (options.model || options['reasoning-effort'] || options.fast != null) {
-      if (options['dry-run']) {
-        printJson({
-          type: 'app-server-session-create',
-          params: {
-            ...params,
-            model: options.model ?? null,
-            reasoningEffort: options['reasoning-effort'] ?? null,
-            fast: options.fast ?? null,
-            serviceTier: serviceTier ?? null,
-            settingsRuntime: { ensure: true, profile: options.profile ?? 'default' },
-          },
-        });
-        return;
-      }
-      const timeoutMs = options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options);
-      const settingsRuntime = await ensureSettingsRuntime(options.profile, { options });
-      const client = new AppServerClient({ command: options.codex ?? 'codex', timeoutMs });
-      let result;
-      try {
-        await client.start();
-        result = await createSession({
-          ...params,
-          model: options.model,
-          reasoningEffort: options['reasoning-effort'],
-          serviceTier,
-          timeoutMs,
-          client,
-        });
-      } finally {
-        await client.close();
-      }
-      const url = threadDeepLink(result.threadId);
-      const profileFinalization = options.profile
-        ? await finalizeProfileForNewConversation({
-          conversationId: result.threadId,
-          sourceProfile: settingsRuntime.runtime.seedProfile,
-          options,
-        })
-        : null;
-      if (profileFinalization == null) {
-        openDeepLink(url, { background: true });
-        await delay(750);
-      }
-      const appliedThreadSettings = await syncDesktopThreadSettings(result.threadId, options, timeoutMs);
-      printJson({
-        resultType: 'success',
-        result: { conversationId: result.threadId },
-        url,
-        submitted: true,
-        model: options.model ?? null,
-        reasoningEffort: options['reasoning-effort'] ?? null,
-        fast: options.fast ?? null,
-        serviceTier: serviceTier ?? null,
-        appliedThreadSettings,
-        settingsRuntime,
-        profileFinalization,
-        initialTurn: result.turn,
-      });
-      return;
-    }
-    const url = newThreadDeepLink(params);
     if (options['dry-run']) {
       printJson({
-        type: 'app-deep-link-request',
-        url,
-        submit: 'Return',
-        ...(options.profile ? {
-          profile: {
-            from: options.profile,
-            action: 'restart-and-assign-before-return',
-          },
-        } : {}),
+        type: 'app-server-session-create',
+        params: {
+          ...params,
+          sandbox: YOLO_SANDBOX,
+          approvalPolicy: YOLO_APPROVAL_POLICY,
+          model: options.model ?? null,
+          reasoningEffort: options['reasoning-effort'] ?? null,
+          fast: options.fast ?? null,
+          serviceTier: serviceTier ?? null,
+          settingsRuntime: (options.model || options['reasoning-effort'] || options.fast != null || options.profile)
+            ? { ensure: true, profile: options.profile ?? 'default' }
+            : null,
+        },
       });
       return;
     }
-    const profileActivation = options.profile
-      ? await activateProfileForNewConversation(options.profile, { options })
+    const timeoutMs = options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options);
+    const settingsRuntime = (options.model || options['reasoning-effort'] || options.fast != null || options.profile)
+      ? await ensureSettingsRuntime(options.profile, { options })
       : null;
-    const profilesBefore = profileActivation == null
-      ? null
-      : runProfileCommand('list');
-    const previousIds = new Set(queryState('SELECT id FROM threads').map((row) => row.id));
-    openDeepLink(url);
-    submitAppComposer();
-    const created = await waitForNewConversation(
-      previousIds,
-      params.cwd,
-      newConversationCreationTimeout(options, profileActivation != null),
-      { retrySubmit: () => submitAppComposer(1) },
-    );
-    let assignedProfile = null;
-    let initialTurn = null;
-    let profileFinalization = null;
-    if (profileActivation != null) {
-      const rows = queryState(`SELECT rollout_path FROM threads WHERE id = ${sqlString(created.id)} LIMIT 1`);
-      const rolloutPath = rows[0]?.rollout_path;
-      if (!rolloutPath) throw new Error(`new conversation has no rollout path: ${created.id}`);
-      const readRecords = () => fs.readFileSync(rolloutPath, 'utf8')
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => JSON.parse(line));
-      initialTurn = await waitForTurnCompletion({
-        readRecords,
-        afterRecordCount: 0,
-        timeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
+    const client = new AppServerClient({ command: options.codex ?? 'codex', timeoutMs });
+    let result;
+    try {
+      await client.start();
+      result = await createSession({
+        ...params,
+        model: options.model,
+        reasoningEffort: options['reasoning-effort'],
+        serviceTier,
+        timeoutMs,
+        client,
       });
-      const transferProfile = selectNewConversationTransferProfile({
-        beforeProfiles: profilesBefore,
-        afterProfiles: runProfileCommand('list'),
-        fallbackProfile: profileActivation.runtime.seedProfile,
-      });
-      profileFinalization = await finalizeProfileForNewConversation({
-        conversationId: created.id,
-        sourceProfile: transferProfile,
-        options,
-      });
-      assignedProfile = profileFinalization.assignedProfile;
+    } finally {
+      await client.close();
     }
+    const url = threadDeepLink(result.threadId);
+    const profileFinalization = options.profile
+      ? await finalizeProfileForNewConversation({
+        conversationId: result.threadId,
+        sourceProfile: settingsRuntime.runtime.seedProfile,
+        options,
+      })
+      : null;
+    if (profileFinalization == null) {
+      openDeepLink(url, { background: true });
+      await delay(750);
+    }
+    const appliedThreadSettings = settingsRuntime
+      ? await syncDesktopThreadSettings(result.threadId, options, timeoutMs)
+      : null;
     printJson({
       resultType: 'success',
-      result: { conversationId: created.id },
-      url: threadDeepLink(created.id),
+      result: { conversationId: result.threadId },
+      url,
       submitted: true,
-      ...(profileActivation ? {
-        profile: {
-          from: profileActivation.from,
-          seedProfile: profileActivation.runtime.seedProfile,
-          transferProfile: profileFinalization.sourceProfile,
-          assignedProfile,
-          initialTurn,
-        },
-      } : {}),
+      sandbox: YOLO_SANDBOX,
+      approvalPolicy: YOLO_APPROVAL_POLICY,
+      model: options.model ?? null,
+      reasoningEffort: options['reasoning-effort'] ?? null,
+      fast: options.fast ?? null,
+      serviceTier: serviceTier ?? null,
+      appliedThreadSettings,
+      settingsRuntime,
+      profileFinalization,
+      initialTurn: result.turn,
     });
     return;
   }
@@ -1658,89 +1774,63 @@ async function run(argv) {
     if (options['dry-run']) {
       printJson({
         ...requestDescription('thread-follower-start-turn', params, options),
-        ...(threadSettings ? {
-          before: requestDescription('thread-follower-update-thread-settings', {
+        settingsRuntime: { ensure: true },
+        before: [
+          requestDescription('thread-owner-discovery', {
+            hostId: 'local',
+            conversationId: options.conversation,
+          }, options),
+          requestDescription('thread-follower-load-complete-history', {
+            conversationId: options.conversation,
+          }, options),
+          requestDescription('thread-follower-update-thread-settings', {
             conversationId: options.conversation,
             threadSettings,
           }, options),
-        } : {}),
+        ],
+        serializedDesktopOperation: true,
         ...(relayConversation ? { relayOnCompletionTo: relayConversation } : {}),
       });
       return;
     }
-    const client = new CodexAppClient({
-      socketPath: options.socket ?? findSocketPath(),
-      timeoutMs: timeoutFrom(options),
+    const started = await startDesktopTurn({
+      conversationId: options.conversation,
+      params,
+      threadSettings,
+      options,
       clientType: 'codex-app-cli-send',
     });
-    openDeepLink(threadDeepLink(options.conversation), { background: true });
-    await delay(750);
-    await client.connect();
-    try {
-      let appliedThreadSettings = null;
-      if (threadSettings) {
-        const settingsResponse = await requestWhenHandlerReady(client, 'thread-follower-update-thread-settings', {
-          conversationId: options.conversation,
-          threadSettings,
-        }, {
-          targetClientId: options['target-client'],
-          readinessTimeoutMs: options.timeout == null ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS : timeoutFrom(options),
-          requestTimeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
-        });
-        assertSuccess(settingsResponse, 'thread-follower-update-thread-settings');
-        appliedThreadSettings = threadSettings;
-      }
-      const response = await requestWhenHandlerReady(client, 'thread-follower-start-turn', params, {
-        targetClientId: options['target-client'],
-        readinessTimeoutMs: options.timeout == null ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS : timeoutFrom(options),
-        requestTimeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
+    if (!relayConversation) {
+      printJson({
+        ...started.response,
+        historyLoaded: true,
+        settingsRuntime: started.settingsRuntime,
+        ...(started.appliedThreadSettings ? { appliedThreadSettings: started.appliedThreadSettings } : {}),
       });
-      assertSuccess(response, 'thread-follower-start-turn');
-      if (!relayConversation) {
-        printJson({
-          ...response,
-          ...(appliedThreadSettings ? { appliedThreadSettings } : {}),
-        });
-        return;
-      }
-      const completion = await waitForTurnCompletion({
-        readRecords,
-        afterRecordCount: beforeRecordCount,
-        expectedTurnId: response?.result?.result?.turn?.id ?? response?.result?.turn?.id ?? null,
-        timeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
-      });
-      client.close();
-      openDeepLink(threadDeepLink(relayConversation));
-      await delay(750);
-      const relayClient = new CodexAppClient({
-        socketPath: options.socket ?? findSocketPath(),
-        timeoutMs: timeoutFrom(options),
-        clientType: 'codex-app-cli-relay',
-      });
-      await relayClient.connect();
-      try {
-        const relayParams = buildFollowerStartTurnParams(
-          relayConversation,
-          resolveFollowerTurnOptions({ text: completion.message.text }),
-        );
-        const relayResponse = await requestWhenHandlerReady(relayClient, 'thread-follower-start-turn', relayParams, {
-          readinessTimeoutMs: options.timeout == null ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS : timeoutFrom(options),
-          requestTimeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
-        });
-        assertSuccess(relayResponse, 'thread-follower-start-turn');
-        printJson({
-          ok: true,
-          conversationId: options.conversation,
-          completion,
-          relayedTo: relayConversation,
-          relayResponse,
-        });
-      } finally {
-        relayClient.close();
-      }
-    } finally {
-      client.close();
+      return;
     }
+    const completion = await waitForTurnCompletion({
+      readRecords,
+      afterRecordCount: beforeRecordCount,
+      expectedTurnId: started.response?.result?.result?.turn?.id ?? started.response?.result?.turn?.id ?? null,
+      timeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
+    });
+    const relayOptions = resolveFollowerTurnOptions({ text: completion.message.text });
+    const relayed = await startDesktopTurn({
+      conversationId: relayConversation,
+      params: buildFollowerStartTurnParams(relayConversation, relayOptions),
+      threadSettings: buildThreadSettings(relayOptions),
+      options,
+      clientType: 'codex-app-cli-relay',
+    });
+    printJson({
+      ok: true,
+      conversationId: options.conversation,
+      completion,
+      relayedTo: relayConversation,
+      relayHistoryLoaded: true,
+      relayResponse: relayed.response,
+    });
     return;
   }
 
@@ -1755,25 +1845,32 @@ async function run(argv) {
       printJson(requestDescription('thread-follower-interrupt-turn', params, options));
       return;
     }
-    const client = new CodexAppClient({
-      socketPath: options.socket ?? findSocketPath(),
-      timeoutMs: timeoutFrom(options),
-      clientType: 'codex-app-cli-stop',
-    });
-    openDeepLink(threadDeepLink(options.conversation));
-    await delay(750);
-    await client.connect();
-    try {
-      const response = await requestWhenHandlerReady(client, 'thread-follower-interrupt-turn', params, {
-        targetClientId: options['target-client'],
-        readinessTimeoutMs: options.timeout == null ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS : timeoutFrom(options),
-        requestTimeoutMs: options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options),
+    const requestTimeoutMs = options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options);
+    const response = await withDesktopOperationLock(async () => {
+      const client = new CodexAppClient({
+        socketPath: options.socket ?? findSocketPath(),
+        timeoutMs: timeoutFrom(options),
+        clientType: 'codex-app-cli-stop',
       });
-      printJson(response);
-      assertSuccess(response, 'thread-follower-interrupt-turn');
-    } finally {
-      client.close();
-    }
+      openDeepLink(threadDeepLink(options.conversation));
+      await delay(750);
+      await client.connect();
+      try {
+        const targetClientId = options['target-client'] ?? await discoverThreadOwner(client, options.conversation, {
+          timeoutMs: options.timeout == null ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS : timeoutFrom(options),
+        });
+        const result = await requestWhenHandlerReady(client, 'thread-follower-interrupt-turn', params, {
+          targetClientId,
+          readinessTimeoutMs: options.timeout == null ? DEFAULT_PROFILE_LAUNCH_TIMEOUT_MS : timeoutFrom(options),
+          requestTimeoutMs,
+        });
+        assertSuccess(result, 'thread-follower-interrupt-turn');
+        return result;
+      } finally {
+        client.close();
+      }
+    }, { timeoutMs: requestTimeoutMs });
+    printJson(response);
     return;
   }
 

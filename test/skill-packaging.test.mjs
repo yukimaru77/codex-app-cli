@@ -23,6 +23,8 @@ test('packages the repository-scoped Codex App session skill', () => {
   assert.match(commandGuide, /codex-app send/);
   assert.match(commandGuide, /codex-app recognize/);
   assert.match(commandGuide, /codex-app profile/);
+  assert.match(commandGuide, /Every `send` first persists `sandbox: danger-full-access` and `approvalPolicy: never`/);
+  assert.match(commandGuide, /serializes `ensure App runtime → open → discover exact owner → load complete history → update settings → start turn` across processes/);
   assert.match(forkToApp, /codex fork SOURCE_SESSION_ID/);
   assert.match(forkToApp, /codex-app recognize/);
   assert.match(forkToApp, /codex-app send/);

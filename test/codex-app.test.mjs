@@ -11,12 +11,14 @@ import {
   AppServerClient,
   CodexAppClient,
   FrameDecoder,
+  acquireDesktopOperationLock,
   activateProfileForNewConversation,
   buildNewThreadParams,
   buildStartTurnParams,
   buildFollowerStartTurnParams,
   buildThreadSettings,
   createSession,
+  discoverThreadOwner,
   encodeFrame,
   ensureSettingsRuntime,
   finalizeProfileForNewConversation,
@@ -25,6 +27,7 @@ import {
   interruptParams,
   isRetryableAppServerStartError,
   lastAssistantMessageForTurn,
+  loadCompleteHistory,
   newConversationCreationTimeout,
   recognizeSession,
   renameThread,
@@ -163,6 +166,118 @@ test('client initializes and sends a versioned request over IPC', async (context
   assert.equal(received[1].version, 2);
 });
 
+test('serializes competing desktop operations with an inter-process lock', async (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-cli-lock-'));
+  const lockPath = path.join(directory, 'desktop.lock');
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+  const releaseFirst = await acquireDesktopOperationLock({ lockPath, timeoutMs: 100, retryMs: 1 });
+  let secondAcquired = false;
+  const second = acquireDesktopOperationLock({ lockPath, timeoutMs: 100, retryMs: 1 }).then((release) => {
+    secondAcquired = true;
+    return release;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(secondAcquired, false);
+  releaseFirst();
+  const releaseSecond = await second;
+  assert.equal(secondAcquired, true);
+  releaseSecond();
+  assert.equal(fs.existsSync(lockPath), false);
+});
+
+test('recovers a desktop operation lock whose owner exited', async (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-cli-stale-lock-'));
+  const lockPath = path.join(directory, 'desktop.lock');
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.writeFileSync(lockPath, JSON.stringify({ pid: 999_999, token: 'stale' }), { mode: 0o600 });
+
+  const release = await acquireDesktopOperationLock({
+    lockPath,
+    timeoutMs: 100,
+    retryMs: 1,
+    isProcessAlive: () => false,
+  });
+  release();
+  assert.equal(fs.existsSync(lockPath), false);
+});
+
+test('loads complete history before a follower operation', async () => {
+  const requests = [];
+  const response = await loadCompleteHistory({
+    async request(method, params, options) {
+      requests.push({ method, params, options });
+      return { resultType: 'success', result: { revision: 42 } };
+    },
+  }, 'thread-1', {
+    targetClientId: 'desktop-1',
+    readinessTimeoutMs: 100,
+    requestTimeoutMs: 200,
+  });
+  assert.equal(response.result.revision, 42);
+  assert.deepEqual(requests, [{
+    method: 'thread-follower-load-complete-history',
+    params: { conversationId: 'thread-1' },
+    options: { targetClientId: 'desktop-1', timeoutMs: 200 },
+  }]);
+});
+
+test('discovers and returns the exact desktop owner client', async () => {
+  const requests = [];
+  const clientId = await discoverThreadOwner({
+    async request(method, params, options) {
+      requests.push({ method, params, options });
+      return { resultType: 'success', handledByClientId: 'desktop-owner-1', result: {} };
+    },
+  }, 'thread-1', { timeoutMs: 200 });
+
+  assert.equal(clientId, 'desktop-owner-1');
+  assert.deepEqual(requests, [{
+    method: 'thread-owner-discovery',
+    params: { hostId: 'local', conversationId: 'thread-1' },
+    options: { timeoutMs: 200 },
+  }]);
+});
+
+test('retries owner discovery while the target App window is opening', async () => {
+  const responses = [
+    { resultType: 'error', error: 'no-client-found' },
+    { resultType: 'success', handledByClientId: 'desktop-owner-2', result: {} },
+  ];
+  let calls = 0;
+  const clientId = await discoverThreadOwner({
+    async request() {
+      calls += 1;
+      return responses.shift();
+    },
+  }, 'thread-2', { timeoutMs: 1_000 });
+
+  assert.equal(clientId, 'desktop-owner-2');
+  assert.equal(calls, 2);
+});
+
+test('waits through a desktop thread owner transition before loading history', async () => {
+  const responses = [
+    { resultType: 'error', error: 'The target app window is not ready' },
+    { resultType: 'error', error: 'no-client-found: thread stream owner became unavailable' },
+    { resultType: 'success', result: { revision: 43 } },
+  ];
+  let calls = 0;
+  const response = await loadCompleteHistory({
+    async request() {
+      calls += 1;
+      return responses.shift();
+    },
+  }, 'thread-1', {
+    targetClientId: undefined,
+    readinessTimeoutMs: 1_000,
+    requestTimeoutMs: 1_000,
+  });
+
+  assert.equal(response.result.revision, 43);
+  assert.equal(calls, 3);
+});
+
 test('waits through transient profile restart IPC failures', async () => {
   let attempts = 0;
   const result = await waitForAppIpcReady({
@@ -230,16 +345,19 @@ test('starts the settings runtime with the requested profile when needed', async
   assert.equal(result.runtime.seedProfile, 'imported-profile');
 });
 
-test('new profile dry-run describes profile assignment without restarting the App', () => {
+test('new profile dry-run describes a full-access App Server session without restarting the App', () => {
   const output = execFileSync(
     process.execPath,
     [path.resolve('bin/codex-app.mjs'), 'new', '--text', 'test', '--profile', 'chrome:Work', '--dry-run'],
     { encoding: 'utf8' },
   );
   const result = JSON.parse(output);
-  assert.deepEqual(result.profile, {
-    from: 'chrome:Work',
-    action: 'restart-and-assign-before-return',
+  assert.equal(result.type, 'app-server-session-create');
+  assert.equal(result.params.sandbox, 'danger-full-access');
+  assert.equal(result.params.approvalPolicy, 'never');
+  assert.deepEqual(result.params.settingsRuntime, {
+    ensure: true,
+    profile: 'chrome:Work',
   });
 });
 
@@ -349,6 +467,8 @@ test('builds follow-up turn parameters', () => {
     clientUserMessageId: 'message-1',
     input: [{ type: 'text', text: 'add a regression test', text_elements: [] }],
     attachments: [],
+    approvalPolicy: 'never',
+    sandboxPolicy: { type: 'dangerFullAccess' },
     cwd: '/tmp/project',
   });
 });
@@ -369,6 +489,8 @@ test('uses the current App follower start-turn payload key', () => {
   assert.equal(params.conversationId, 'thread-1');
   assert.equal(params.turnStart.request.threadId, 'thread-1');
   assert.equal(params.turnStart.request.input[0].text, 'continue');
+  assert.equal(params.turnStart.request.approvalPolicy, 'never');
+  assert.deepEqual(params.turnStart.request.sandboxPolicy, { type: 'dangerFullAccess' });
   assert.deepEqual(params.turnStart.context, {
     attachments: [],
     commentAttachments: [],
@@ -415,6 +537,10 @@ test('builds persistent thread settings for model, reasoning, and fast overrides
     'reasoning-effort': 'max',
     fast: 'on',
   }), {
+    approvalPolicy: 'never',
+    approvalsReviewer: 'user',
+    sandboxPolicy: { type: 'dangerFullAccess' },
+    permissions: null,
     model: 'gpt-5.6-luna',
     effort: 'max',
     serviceTier: 'priority',
@@ -427,8 +553,19 @@ test('builds persistent thread settings for model, reasoning, and fast overrides
       },
     },
   });
-  assert.deepEqual(buildThreadSettings({ fast: 'off' }), { serviceTier: null });
-  assert.equal(buildThreadSettings({ text: 'no override' }), null);
+  assert.deepEqual(buildThreadSettings({ fast: 'off' }), {
+    approvalPolicy: 'never',
+    approvalsReviewer: 'user',
+    sandboxPolicy: { type: 'dangerFullAccess' },
+    permissions: null,
+    serviceTier: null,
+  });
+  assert.deepEqual(buildThreadSettings({ text: 'no override' }), {
+    approvalPolicy: 'never',
+    approvalsReviewer: 'user',
+    sandboxPolicy: { type: 'dangerFullAccess' },
+    permissions: null,
+  });
 });
 
 test('reports the latest turn lifecycle status', () => {
@@ -863,10 +1000,14 @@ test('forks, bootstraps, sends a separate initial turn, names, and verifies the 
     serviceTier: 'priority',
   });
   assert.equal(calls[1].params.input[0].text, 'bootstrap');
+  assert.equal(calls[1].params.approvalPolicy, 'never');
+  assert.deepEqual(calls[1].params.sandboxPolicy, { type: 'dangerFullAccess' });
   assert.equal(calls[1].params.model, 'gpt-5.6-luna');
   assert.equal(calls[1].params.effort, 'max');
   assert.equal(calls[1].params.serviceTier, 'priority');
   assert.equal(calls[2].params.input[0].text, 'first instruction');
+  assert.equal(calls[2].params.approvalPolicy, 'never');
+  assert.deepEqual(calls[2].params.sandboxPolicy, { type: 'dangerFullAccess' });
   assert.equal(calls[2].params.model, undefined);
   assert.equal(calls[2].params.effort, undefined);
   assert.deepEqual(calls[3].params, { threadId: 'child-thread', name: 'Imported project context' });
@@ -916,6 +1057,8 @@ test('creates a new session with model and effort on its first turn', async () =
         cwd: '/tmp/sample-project',
         ephemeral: false,
         threadSource: 'user',
+        sandbox: 'danger-full-access',
+        approvalPolicy: 'never',
         model: 'gpt-5.6-luna',
         config: { model_reasoning_effort: 'max' },
         serviceTier: null,
@@ -927,6 +1070,8 @@ test('creates a new session with model and effort on its first turn', async () =
         threadId: 'new-thread',
         cwd: '/tmp/sample-project',
         input: [{ type: 'text', text: 'first prompt' }],
+        approvalPolicy: 'never',
+        sandboxPolicy: { type: 'dangerFullAccess' },
         model: 'gpt-5.6-luna',
         effort: 'max',
         serviceTier: null,
