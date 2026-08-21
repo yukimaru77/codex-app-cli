@@ -23,15 +23,18 @@ import {
   findSocketPath,
   installRollout,
   interruptParams,
+  isRetryableAppServerStartError,
   lastAssistantMessageForTurn,
   newConversationCreationTimeout,
   recognizeSession,
   renameThread,
+  planRolloutInstall,
   resolveFollowerTurnOptions,
   rolloutDestination,
   selectNewConversationTransferProfile,
   selectedTranscriptMessages,
   serviceTierFromFast,
+  startAppServerForRecognize,
   subscribeToRolloutChanges,
   transcriptMessages,
   turnStatus,
@@ -621,8 +624,51 @@ test('accepts a contiguous fork page with a nonzero first ordinal already in the
 
   const validation = validateRollout(source, sessionId);
   assert.equal(validation.firstOrdinal, 2343);
+  assert.deepEqual(planRolloutInstall(validation, home), { destination: source, action: 'reuse' });
   assert.equal(installRollout(validation, home), source);
   assert.equal(fs.existsSync(source), true);
+});
+
+test('recognize dry-run reuses a rollout already at its shared-store destination', (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-cli-recognize-dry-run-'));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const sessionId = '01900000-0000-7000-8000-000000000004';
+  const home = path.join(directory, 'codex-home');
+  const sessionDirectory = path.join(home, 'sessions', '2026', '08', '12');
+  fs.mkdirSync(sessionDirectory, { recursive: true });
+  const source = writeRollout(sessionDirectory, sessionId);
+  const output = execFileSync(process.execPath, [
+    path.resolve('bin/codex-app.mjs'),
+    'recognize',
+    '--rollout', source,
+    '--session-id', sessionId,
+    '--cwd', directory,
+    '--name', 'dry-run reuse',
+    '--dry-run',
+  ], {
+    encoding: 'utf8',
+    env: { ...process.env, CODEX_HOME: home },
+  });
+
+  const result = JSON.parse(output);
+  assert.equal(result.ok, true);
+  assert.equal(result.rollout.source, source);
+  assert.equal(result.rollout.destination, source);
+  assert.equal(result.rollout.action, 'reuse');
+});
+
+test('plans rollout installation without allowing an unrelated existing destination', (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-cli-rollout-plan-'));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const sessionId = '01900000-0000-7000-8000-000000000003';
+  const validation = validateRollout(writeRollout(directory, sessionId), sessionId);
+  const home = path.join(directory, 'codex-home');
+  const destination = rolloutDestination(validation, home);
+
+  assert.deepEqual(planRolloutInstall(validation, home), { destination, action: 'install' });
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.writeFileSync(destination, 'unrelated');
+  assert.throws(() => planRolloutInstall(validation, home), /refusing to overwrite existing rollout/);
 });
 
 test('rejects rollout identity and ordinal mismatches', (context) => {
@@ -654,6 +700,63 @@ test('app-server client performs JSONL handshake, requests, notifications, and e
   } finally {
     await client.close();
   }
+});
+
+test('recognize app-server startup retries only state runtime initialization failures', async () => {
+  const clients = [];
+  const delays = [];
+  const result = await startAppServerForRecognize(() => {
+    const attempt = clients.length + 1;
+    const client = {
+      closed: false,
+      async start() {
+        if (attempt === 1) throw new Error('failed to initialize sqlite state runtime under /tmp/codex');
+      },
+      async close() { this.closed = true; },
+    };
+    clients.push(client);
+    return client;
+  }, {
+    retryDelayMs: 25,
+    delayImpl: async (milliseconds) => delays.push(milliseconds),
+  });
+
+  assert.equal(result.client, clients[1]);
+  assert.equal(result.attempts, 2);
+  assert.equal(clients[0].closed, true);
+  assert.equal(clients[1].closed, false);
+  assert.deepEqual(delays, [25]);
+  assert.equal(isRetryableAppServerStartError(new Error('database is locked')), true);
+});
+
+test('recognize app-server startup does not retry unrelated failures', async () => {
+  let created = 0;
+  await assert.rejects(startAppServerForRecognize(() => {
+    created += 1;
+    return {
+      async start() { throw new Error('codex binary not found'); },
+      async close() {},
+    };
+  }, { delayImpl: async () => {} }), /codex binary not found/);
+  assert.equal(created, 1);
+});
+
+test('recognize app-server startup stops after the bounded retry count', async () => {
+  let created = 0;
+  const delays = [];
+  await assert.rejects(startAppServerForRecognize(() => {
+    created += 1;
+    return {
+      async start() { throw new Error('database is locked'); },
+      async close() {},
+    };
+  }, {
+    attempts: 3,
+    retryDelayMs: 10,
+    delayImpl: async (milliseconds) => delays.push(milliseconds),
+  }), /database is locked/);
+  assert.equal(created, 3);
+  assert.deepEqual(delays, [10, 20]);
 });
 
 test('forks, bootstraps, sends a separate initial turn, names, and verifies the child thread', async () => {

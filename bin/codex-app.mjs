@@ -522,6 +522,32 @@ export class AppServerClient {
   }
 }
 
+export function isRetryableAppServerStartError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /database is locked|failed to initialize (?:sqlite )?state runtime/i.test(message);
+}
+
+export async function startAppServerForRecognize(createClient, {
+  attempts = 3,
+  retryDelayMs = 500,
+  delayImpl = delay,
+} = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const client = createClient();
+    try {
+      await client.start();
+      return { client, attempts: attempt };
+    } catch (error) {
+      lastError = error;
+      await client.close();
+      if (!isRetryableAppServerStartError(error) || attempt === attempts) throw error;
+      await delayImpl(retryDelayMs * attempt);
+    }
+  }
+  throw lastError;
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -589,6 +615,15 @@ export function validateRollout(sourcePath, expectedSessionId) {
 
 export function rolloutDestination(validation, home = codexHome()) {
   return path.join(home, 'sessions', validation.year, validation.month, validation.day, validation.filename);
+}
+
+export function planRolloutInstall(validation, home = codexHome()) {
+  const destination = rolloutDestination(validation, home);
+  if (path.resolve(validation.sourcePath) === path.resolve(destination)) {
+    return { destination, action: 'reuse' };
+  }
+  if (fs.existsSync(destination)) throw new Error(`refusing to overwrite existing rollout: ${destination}`);
+  return { destination, action: 'install' };
 }
 
 export function installRollout(validation, home = codexHome()) {
@@ -1362,10 +1397,10 @@ async function run(argv) {
     const name = options.name ?? path.basename(workspace);
     if (!name.trim()) throw new Error('recognize requires a non-empty --name');
     const validation = validateRollout(options.rollout, options['session-id']);
-    const destination = rolloutDestination(validation);
+    const rolloutPlan = planRolloutInstall(validation);
+    const destination = rolloutPlan.destination;
 
     if (options['dry-run']) {
-      if (fs.existsSync(destination)) throw new Error(`refusing to overwrite existing rollout: ${destination}`);
       printJson({
         ok: true,
         dryRun: true,
@@ -1375,6 +1410,7 @@ async function run(argv) {
           sessionId: validation.sessionId,
           records: validation.recordCount,
           mode: '0600',
+          action: rolloutPlan.action,
         },
         fork: {
           threadId: validation.sessionId,
@@ -1403,14 +1439,14 @@ async function run(argv) {
       : null;
     const installedPath = installRollout(validation);
     const timeoutMs = options.timeout == null ? DEFAULT_TURN_TIMEOUT_MS : timeoutFrom(options);
-    const client = new AppServerClient({
+    const appServer = await startAppServerForRecognize(() => new AppServerClient({
       command: options.codex ?? 'codex',
       timeoutMs,
       env: process.env,
-    });
+    }));
+    const client = appServer.client;
     let result;
     try {
-      await client.start();
       result = await recognizeSession({
         templateSessionId: validation.sessionId,
         cwd: workspace,
@@ -1440,6 +1476,7 @@ async function run(argv) {
       name: result.thread.name,
       bootstrapStatus: result.bootstrapTurn.status,
       initialTurnStatus: result.initialTurn?.status ?? null,
+      appServerStartAttempts: appServer.attempts,
       appliedThreadSettings,
       settingsRuntime,
       appUrl,
