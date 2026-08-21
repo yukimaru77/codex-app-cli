@@ -620,7 +620,7 @@ export function installRollout(validation, home = codexHome()) {
   }
 }
 
-async function runAppServerTurn(client, threadId, cwd, text, timeoutMs, { model, effort } = {}) {
+async function runAppServerTurn(client, threadId, cwd, text, timeoutMs, { model, effort, serviceTier } = {}) {
   const completed = client.waitForNotification(
     'turn/completed',
     (params) => params?.threadId === threadId,
@@ -634,6 +634,7 @@ async function runAppServerTurn(client, threadId, cwd, text, timeoutMs, { model,
       input: [{ type: 'text', text }],
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
+      ...(serviceTier !== undefined ? { serviceTier } : {}),
     }, timeoutMs);
   } catch (error) {
     completed.cancel?.();
@@ -658,6 +659,7 @@ export async function recognizeSession({
   initialText,
   model,
   reasoningEffort,
+  serviceTier,
   timeoutMs = DEFAULT_TURN_TIMEOUT_MS,
   client,
 }) {
@@ -671,11 +673,12 @@ export async function recognizeSession({
     threadSource: 'user',
     ...(model ? { model } : {}),
     ...(reasoningEffort ? { config: { model_reasoning_effort: reasoningEffort } } : {}),
+    ...(serviceTier !== undefined ? { serviceTier } : {}),
   }, timeoutMs);
   const threadId = forkResult?.thread?.id;
   if (!threadId) throw new Error('thread/fork did not return thread.id');
 
-  const turnSettings = { model, effort: reasoningEffort };
+  const turnSettings = { model, effort: reasoningEffort, serviceTier };
   const bootstrapTurn = await runAppServerTurn(client, threadId, absoluteCwd, bootstrapText, timeoutMs, turnSettings);
   let initialTurn = null;
   if (initialText) initialTurn = await runAppServerTurn(client, threadId, absoluteCwd, initialText, timeoutMs);
@@ -691,7 +694,7 @@ export async function recognizeSession({
   return { threadId, thread, bootstrapTurn, initialTurn };
 }
 
-export async function createSession({ cwd, text, model, reasoningEffort, timeoutMs, client }) {
+export async function createSession({ cwd, text, model, reasoningEffort, serviceTier, timeoutMs, client }) {
   const absoluteCwd = path.resolve(cwd);
   const started = await client.request('thread/start', {
     cwd: absoluteCwd,
@@ -699,12 +702,14 @@ export async function createSession({ cwd, text, model, reasoningEffort, timeout
     threadSource: 'user',
     ...(model ? { model } : {}),
     ...(reasoningEffort ? { config: { model_reasoning_effort: reasoningEffort } } : {}),
+    ...(serviceTier !== undefined ? { serviceTier } : {}),
   }, timeoutMs);
   const threadId = started?.thread?.id;
   if (!threadId) throw new Error('thread/start did not return thread.id');
   const turn = await runAppServerTurn(client, threadId, absoluteCwd, text, timeoutMs, {
     model,
     effort: reasoningEffort,
+    serviceTier,
   });
   const readResult = await client.request('thread/read', { threadId, includeTurns: true }, timeoutMs);
   if (readResult?.thread?.id !== threadId) throw new Error(`thread/read did not return new thread: ${threadId}`);
@@ -789,6 +794,13 @@ export function buildNewThreadParams(options, cwdDefault = process.cwd()) {
   return { cwd, text };
 }
 
+export function serviceTierFromFast(value) {
+  if (value == null) return undefined;
+  if (value === 'on') return 'priority';
+  if (value === 'off') return null;
+  throw new Error('--fast must be on or off');
+}
+
 export function buildStartTurnParams(options) {
   const text = textFrom(options);
   if (!text) throw new Error('send requires --text "..." or trailing prompt text');
@@ -800,6 +812,8 @@ export function buildStartTurnParams(options) {
   if (options.cwd) params.cwd = path.resolve(options.cwd);
   if (options.model) params.model = options.model;
   if (options['reasoning-effort']) params.effort = options['reasoning-effort'];
+  const serviceTier = serviceTierFromFast(options.fast);
+  if (serviceTier !== undefined) params.serviceTier = serviceTier;
   return params;
 }
 
@@ -825,6 +839,7 @@ export function buildFollowerStartTurnParams(conversationId, options) {
 }
 
 export function resolveFollowerTurnOptions(options) {
+  if (options.fast != null) return options;
   return {
     ...options,
     model: options.model || DEFAULT_FOLLOWER_MODEL,
@@ -836,6 +851,8 @@ export function buildThreadSettings(options) {
   const settings = {};
   if (options.model) settings.model = options.model;
   if (options['reasoning-effort']) settings.effort = options['reasoning-effort'];
+  const serviceTier = serviceTierFromFast(options.fast);
+  if (serviceTier !== undefined) settings.serviceTier = serviceTier;
   if (options.model && options['reasoning-effort']) {
     settings.collaborationMode = {
       mode: 'default',
@@ -1192,10 +1209,10 @@ function usage() {
   codex-app rename --conversation <id> --name <name> [--dry-run]
   codex-app list [--cwd <path>] [--limit <n>] [--archived] [--json]
   codex-app read --conversation <id> [--all-item] [--json]
-  codex-app recognize --rollout <jsonl> --session-id <id> --cwd <workspace> [--name <name>] [--text <first instruction>] [--model <model>] [--reasoning-effort <effort>] [--profile <profile>] [--dry-run]
+  codex-app recognize --rollout <jsonl> --session-id <id> --cwd <workspace> [--name <name>] [--text <first instruction>] [--model <model>] [--reasoning-effort <effort>] [--fast <on|off>] [--profile <profile>] [--dry-run]
   codex-app open --conversation <id> [--dry-run]
-  codex-app new --text <prompt> [--cwd <path>] [--model <model>] [--reasoning-effort <effort>] [--profile <profile>] [--dry-run]
-  codex-app send --conversation <id> --text <prompt> [--model <model>] [--reasoning-effort <effort>] [--form <conversation-id>] [--cwd <path>] [--dry-run]
+  codex-app new --text <prompt> [--cwd <path>] [--model <model>] [--reasoning-effort <effort>] [--fast <on|off>] [--profile <profile>] [--dry-run]
+  codex-app send --conversation <id> --text <prompt> [--model <model>] [--reasoning-effort <effort>] [--fast <on|off>] [--form <conversation-id>] [--cwd <path>] [--dry-run]
   codex-app stop --conversation <id> [--dry-run]
   codex-app watch [--conversation <id>] [--timeout <ms>]
   codex-app profile <inspect|list|chrome-list|restart|status|restore> [options]
@@ -1331,6 +1348,7 @@ async function run(argv) {
   }
 
   if (command === 'recognize') {
+    const serviceTier = serviceTierFromFast(options.fast);
     if (!options.cwd) throw new Error('recognize requires --cwd <workspace>');
     const workspace = path.resolve(options.cwd);
     let workspaceStat;
@@ -1370,7 +1388,9 @@ async function run(argv) {
         initialText: textFrom(options) || null,
         model: options.model ?? null,
         reasoningEffort: options['reasoning-effort'] ?? null,
-        settingsRuntime: (options.model || options['reasoning-effort'] || options.profile)
+        fast: options.fast ?? null,
+        serviceTier: serviceTier ?? null,
+        settingsRuntime: (options.model || options['reasoning-effort'] || options.fast != null || options.profile)
           ? { ensure: true, profile: options.profile ?? 'default' }
           : null,
         name,
@@ -1378,7 +1398,7 @@ async function run(argv) {
       return;
     }
 
-    const settingsRuntime = (options.model || options['reasoning-effort'] || options.profile)
+    const settingsRuntime = (options.model || options['reasoning-effort'] || options.fast != null || options.profile)
       ? await ensureSettingsRuntime(options.profile, { options })
       : null;
     const installedPath = installRollout(validation);
@@ -1399,6 +1419,7 @@ async function run(argv) {
         initialText: textFrom(options) || null,
         model: options.model,
         reasoningEffort: options['reasoning-effort'],
+        serviceTier,
         timeoutMs,
         client,
       });
@@ -1442,7 +1463,8 @@ async function run(argv) {
 
   if (command === 'new') {
     const params = buildNewThreadParams(options);
-    if (options.model || options['reasoning-effort']) {
+    const serviceTier = serviceTierFromFast(options.fast);
+    if (options.model || options['reasoning-effort'] || options.fast != null) {
       if (options['dry-run']) {
         printJson({
           type: 'app-server-session-create',
@@ -1450,6 +1472,8 @@ async function run(argv) {
             ...params,
             model: options.model ?? null,
             reasoningEffort: options['reasoning-effort'] ?? null,
+            fast: options.fast ?? null,
+            serviceTier: serviceTier ?? null,
             settingsRuntime: { ensure: true, profile: options.profile ?? 'default' },
           },
         });
@@ -1465,6 +1489,7 @@ async function run(argv) {
           ...params,
           model: options.model,
           reasoningEffort: options['reasoning-effort'],
+          serviceTier,
           timeoutMs,
           client,
         });
@@ -1491,6 +1516,8 @@ async function run(argv) {
         submitted: true,
         model: options.model ?? null,
         reasoningEffort: options['reasoning-effort'] ?? null,
+        fast: options.fast ?? null,
+        serviceTier: serviceTier ?? null,
         appliedThreadSettings,
         settingsRuntime,
         profileFinalization,

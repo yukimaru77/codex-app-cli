@@ -121,10 +121,11 @@ codex-app new \
   --cwd "$PWD" \
   --model 'gpt-5.6-luna' \
   --reasoning-effort max \
+  --fast on \
   --text 'Find the failing tests and fix them.'
 ```
 
-`--model` and `--reasoning-effort` are applied when the session is created and synchronized to the Desktop composer's complete thread settings after the first turn. The command ensures the in-memory App runtime is active first; this runtime also fixes a Desktop state race that could leave the composer displaying the previous effort even though the turn ran with the requested effort. The signed App bundle is not modified. The same options are supported by `recognize`, including its bootstrap turn and imported Desktop thread.
+`--model`, `--reasoning-effort`, and `--fast on|off` are applied when the session is created and synchronized to the Desktop composer's complete thread settings after the first turn. `--fast on` selects the Fast (`priority`) service tier; `--fast off` explicitly returns to the standard tier. Omitting `--fast` keeps the existing/default tier. The command ensures the in-memory App runtime is active first; this runtime also fixes a Desktop state race that could leave the composer displaying the previous effort even though the turn ran with the requested effort. The signed App bundle is not modified. The same options are supported by `recognize`, including its bootstrap turn and imported Desktop thread.
 
 Add `--profile` to select the initial in-app Browser profile for the new session. It accepts the same values as `codex-app profile restart --from`, including Chrome directory and display-name selectors.
 
@@ -155,6 +156,7 @@ codex-app send \
   --cwd "$PWD" \
   --model 'gpt-5.6-luna' \
   --reasoning-effort max \
+  --fast off \
   --text 'Add a regression test as well.'
 
 codex-app stop --conversation '<thread-id>'
@@ -163,7 +165,7 @@ codex-app watch --conversation '<thread-id>'
 
 `watch` waits up to four hours by default so long-running browser E2E turns do not silently lose their result monitor. Use `--timeout <ms>` only when a different bound is intentional.
 
-When `--model` or `--reasoning-effort` is specified, `send` first updates the conversation's complete thread settings, including its collaboration-mode model and effort, and then starts the turn. Omitting both keeps the settings established by `new`, `recognize`, or an earlier `send`. `send` and `stop` first open the target thread so that the live Desktop handler owns it, then use private App IPC. Add `--dry-run` to print the request without sending it.
+When `--model`, `--reasoning-effort`, or `--fast` is specified, `send` first updates the conversation's complete thread settings and then starts the turn. `--fast on` enables Fast mode and `--fast off` disables it without changing the model or reasoning effort; omitting the option leaves the tier unchanged. `send` and `stop` first open the target thread so that the live Desktop handler owns it, then use private App IPC. Add `--dry-run` to print the request without sending it.
 
 ### Import an external rollout
 
@@ -188,6 +190,7 @@ codex-app recognize \
   --name 'Imported project context' \
   --model 'gpt-5.6-luna' \
   --reasoning-effort max \
+  --fast on \
   --text 'Summarize the imported context.'
 ```
 

@@ -31,6 +31,7 @@ import {
   rolloutDestination,
   selectNewConversationTransferProfile,
   selectedTranscriptMessages,
+  serviceTierFromFast,
   subscribeToRolloutChanges,
   transcriptMessages,
   turnStatus,
@@ -349,6 +350,17 @@ test('builds follow-up turn parameters', () => {
   });
 });
 
+test('maps explicit fast mode values to service tiers', () => {
+  assert.equal(serviceTierFromFast(undefined), undefined);
+  assert.equal(serviceTierFromFast('on'), 'priority');
+  assert.equal(serviceTierFromFast('off'), null);
+  assert.throws(() => serviceTierFromFast('yes'), /--fast must be on or off/);
+
+  assert.equal(buildStartTurnParams({ text: 'fast', fast: 'on' }).serviceTier, 'priority');
+  assert.equal(buildStartTurnParams({ text: 'standard', fast: 'off' }).serviceTier, null);
+  assert.equal('serviceTier' in buildStartTurnParams({ text: 'unchanged' }), false);
+});
+
 test('uses the current App follower start-turn payload key', () => {
   const params = buildFollowerStartTurnParams('thread-1', { text: 'continue' });
   assert.equal(params.conversationId, 'thread-1');
@@ -380,6 +392,13 @@ test('defaults follower turns to the supported Luna model at max effort', () => 
     model: 'custom-model',
     'reasoning-effort': 'low',
   });
+  assert.deepEqual(resolveFollowerTurnOptions({
+    text: 'change only fast mode',
+    fast: 'off',
+  }), {
+    text: 'change only fast mode',
+    fast: 'off',
+  });
 });
 
 test('generates one idempotency key for each follow-up turn request', () => {
@@ -387,13 +406,15 @@ test('generates one idempotency key for each follow-up turn request', () => {
   assert.match(params.clientUserMessageId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 });
 
-test('builds persistent thread settings for model and reasoning overrides', () => {
+test('builds persistent thread settings for model, reasoning, and fast overrides', () => {
   assert.deepEqual(buildThreadSettings({
     model: 'gpt-5.6-luna',
     'reasoning-effort': 'max',
+    fast: 'on',
   }), {
     model: 'gpt-5.6-luna',
     effort: 'max',
+    serviceTier: 'priority',
     collaborationMode: {
       mode: 'default',
       settings: {
@@ -403,6 +424,7 @@ test('builds persistent thread settings for model and reasoning overrides', () =
       },
     },
   });
+  assert.deepEqual(buildThreadSettings({ fast: 'off' }), { serviceTier: null });
   assert.equal(buildThreadSettings({ text: 'no override' }), null);
 });
 
@@ -673,6 +695,7 @@ test('forks, bootstraps, sends a separate initial turn, names, and verifies the 
     initialText: 'first instruction',
     model: 'gpt-5.6-luna',
     reasoningEffort: 'max',
+    serviceTier: 'priority',
     timeoutMs: 1_000,
     client,
   });
@@ -694,10 +717,12 @@ test('forks, bootstraps, sends a separate initial turn, names, and verifies the 
     threadSource: 'user',
     model: 'gpt-5.6-luna',
     config: { model_reasoning_effort: 'max' },
+    serviceTier: 'priority',
   });
   assert.equal(calls[1].params.input[0].text, 'bootstrap');
   assert.equal(calls[1].params.model, 'gpt-5.6-luna');
   assert.equal(calls[1].params.effort, 'max');
+  assert.equal(calls[1].params.serviceTier, 'priority');
   assert.equal(calls[2].params.input[0].text, 'first instruction');
   assert.equal(calls[2].params.model, undefined);
   assert.equal(calls[2].params.effort, undefined);
@@ -735,6 +760,7 @@ test('creates a new session with model and effort on its first turn', async () =
     text: 'first prompt',
     model: 'gpt-5.6-luna',
     reasoningEffort: 'max',
+    serviceTier: null,
     timeoutMs: 1_000,
     client,
   });
@@ -749,6 +775,7 @@ test('creates a new session with model and effort on its first turn', async () =
         threadSource: 'user',
         model: 'gpt-5.6-luna',
         config: { model_reasoning_effort: 'max' },
+        serviceTier: null,
       },
     },
     {
@@ -759,6 +786,7 @@ test('creates a new session with model and effort on its first turn', async () =
         input: [{ type: 'text', text: 'first prompt' }],
         model: 'gpt-5.6-luna',
         effort: 'max',
+        serviceTier: null,
       },
     },
     { method: 'thread/read', params: { threadId: 'new-thread', includeTurns: true } },
