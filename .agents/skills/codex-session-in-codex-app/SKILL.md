@@ -33,4 +33,14 @@ When the user explicitly asks to fork a Codex CLI session and move that fork int
 
 Browser profile selection is creation-time only: use `new --profile` or `recognize --profile`. Do not claim that `profile restart` can change an existing session. Browser profile setup and Browser tool verification are separate facts. A successful profile import or active runtime proves that Browser state is prepared; it does not prove a particular App turn called the in-app Browser. When Browser use itself must be verified, require a completed exact turn plus matching Browser tool output as described in the command guide.
 
+## App restart safety
+
+Treat every Browser runtime restart as a global, disruptive operation: it can terminate or interrupt unrelated Codex App turns owned by the user or other agents. Authorization to migrate a session or use the in-app Browser does **not** authorize restarting the App.
+
+- Before `new --profile`, `recognize --profile`, `profile restart`, or `profile restore`, run `codex-app profile status` and determine whether the requested task actually requires changing Browser profile state.
+- If a compatible runtime is already active and no specific profile change was requested, omit `--profile` from `new` or `recognize`. In particular, do not add `--profile default` merely to ensure Browser availability.
+- Keep session migration and Browser runtime/profile preparation separate. `recognize` can migrate a rollout without `--profile`; an already-active compatible runtime can then serve the migrated conversation.
+- If profile preparation or recovery would quit or restart the signed App, stop before the mutating command, explain that all App sessions may be interrupted, and obtain explicit user confirmation immediately before proceeding.
+- A failed attempt that already triggered a restart is not permission to retry another restart. Reinspect status and request confirmation if another disruptive attempt is needed.
+
 Use the normal signed App and shared session store. Do not launch alternate App user-data roots or modify the signed App bundle.

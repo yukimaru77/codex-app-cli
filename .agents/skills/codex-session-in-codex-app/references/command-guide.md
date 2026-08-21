@@ -83,6 +83,8 @@ codex-app recognize \
   --dry-run
 ```
 
+Omit `--profile` unless the user requested a specific Browser profile or status inspection proves that profile preparation is required. `--profile default` is not a harmless default: it may quit and restart the shared signed App, interrupting unrelated sessions. Read the restart-safety rules in `SKILL.md` before supplying any profile selector.
+
 Then omit `--dry-run` for the live import. `--model`, `--reasoning-effort`, `--fast on|off`, and an optional `--text` are supported, but a workflow may require the first real instruction to remain separate. Successful output contains the App child in `threadId`; use that ID for later commands.
 
 An input rollout already at its exact shared-store destination is valid and dry-run reports `rollout.action: "reuse"`. A different existing destination fails closed. `recognize` makes a bounded retry for transient SQLite state-runtime startup failures and reports `appServerStartAttempts`; it does not retry the fork operation itself.
@@ -110,7 +112,9 @@ codex-app profile restart --from 'chrome:Profile 4'
 codex-app profile restore
 ```
 
-Use one exact selector returned by the list commands. Close Chrome before importing a Chrome profile. `restart --from` selects the seed for sessions created afterward; it does not change an existing session's Browser profile. Choose the intended profile at creation with `new --profile` or `recognize --profile`. `restore` returns to an ordinary unpatched App launch.
+Use one exact selector returned by the list commands. Close Chrome before importing a Chrome profile. `restart --from` selects the seed for sessions created afterward; it does not change an existing session's Browser profile. Choose an explicitly requested profile at creation with `new --profile` or `recognize --profile`. `restore` returns to an ordinary unpatched App launch.
+
+`profile restart`, `profile restore`, and profile-bearing `new` or `recognize` may restart the shared signed App. They are disruptive operations, not ordinary setup. First inspect `profile status`; if the compatible runtime is already active and no profile change was requested, preserve it and omit profile mutation. Otherwise obtain explicit user confirmation immediately before the operation.
 
 For ordinary existing-session Browser work, verify `profile status` reports an active runtime before sending. Profile preparation, Cookie import, and Browser execution are distinct: when the request requires proof that the in-app Browser works, send a non-mutating Browser task to the target conversation, wait for its exact turn, and verify matching tool output contains the resulting tab ID, URL, or title. An assistant assertion or `runtimeActive: true` alone is insufficient.
 
