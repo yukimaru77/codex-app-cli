@@ -1,6 +1,6 @@
 ---
 name: codex-session-in-codex-app
-description: Open, inspect, continue, stop, rename, configure, and orchestrate existing Codex sessions in Codex App through the shared session store, live private IPC, and codex app-server. Use when given a thread/session ID, including requests to open it in the App, read its transcript, check turn status, send a follow-up, select model, reasoning effort, or Fast mode, relay a result, rename the chat, stop a turn, or verify the App-produced response.
+description: Open, inspect, continue, stop, rename, configure, migrate, and orchestrate Codex sessions in Codex App through the shared session store, live private IPC, and codex app-server. Use when given a thread/session ID, including requests to fork a current CLI session and move the fork into the App, open or read a session, send a follow-up, select model, reasoning effort, Fast mode, or Browser profile, relay a result, rename the chat, stop a turn, or verify the App-produced response.
 ---
 
 # Operate an existing Codex App session
@@ -33,6 +33,10 @@ codex-app new \
 
 `read` returns only the latest message by default. Add `--all-item` only when the complete message transcript is required.
 
+## Fork a CLI session into the App
+
+When the user explicitly asks to fork a Codex CLI session and move that fork into Codex App, read and follow [references/fork-to-app.md](references/fork-to-app.md). This is a distinct workflow from creating an unrelated App session. Do not replace it with `codex-app new`, a prompt containing the parent session ID, or any other logical-fork approximation.
+
 ## Send and relay results
 
 Send an ordinary follow-up through the App's live IPC:
@@ -62,7 +66,7 @@ This waits for the exact worker turn to complete, selects that turn's final assi
 
 ## Session integrity
 
-Use the existing session ID. Do not fork or copy an installed rollout, and do not mutate `state_5.sqlite`. Use `recognize` only for an explicitly supplied external paginated rollout that is not installed.
+For ordinary operations, use the existing session ID and do not fork. Fork only when the user explicitly requests a fork or migration. Never copy or edit an installed rollout and never mutate `state_5.sqlite`. `recognize` may reuse a source rollout already at its exact shared-store destination; it must never overwrite one.
 
 `turn-status` derives `idle`, `inProgress`, `completed`, or `aborted` from persisted rollout lifecycle events. Treat a stale `inProgress` as possible after an abnormal process exit.
 
