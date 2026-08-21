@@ -28,6 +28,7 @@
     "node": ">=20"
   },
   "files": [
+    ".agents",
     "bin",
     "docs",
     "iab",

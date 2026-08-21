@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex App Session Orchestration"
+  short_description: "Codex App sessionを操作・設定・監視・relayする"
+  default_prompt: "Use $codex-session-in-codex-app to operate and configure this session in Codex App."

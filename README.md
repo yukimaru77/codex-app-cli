@@ -34,6 +34,14 @@ codex-app status
 
 The package installs its runtime dependencies with `npm link` or `npm install`.
 
+The repository also includes the `codex-session-in-codex-app` skill under `.agents/skills/`. Codex discovers it automatically while working in this repository. To make this repository the source of truth for the skill in every workspace, link it into the user skill directory:
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+ln -s "$PWD/.agents/skills/codex-session-in-codex-app" \
+  "${CODEX_HOME:-$HOME/.codex}/skills/codex-session-in-codex-app"
+```
+
 ## Commands
 
 | Command | What it uses | Purpose |
