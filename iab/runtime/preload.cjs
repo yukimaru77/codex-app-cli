@@ -7,6 +7,10 @@ const { transformMainBundle } = require("./transform.cjs");
 const { createProfileSeeder } = require("./profile-seed.cjs");
 const { installChromeProfileImport } = require("./chrome-import.cjs");
 const { installRendererSettingsPatch } = require("./renderer-settings-patch.cjs");
+const {
+  installTrustedServicePathHooks,
+  rewriteTrustedServicesEnv,
+} = require("./browser-plugin-path.cjs");
 const { RUNTIME_PATCH_VERSION } = require("./version.cjs");
 
 const logPath =
@@ -54,6 +58,14 @@ Module.prototype._compile = function compileWithThreadProfiles(source, filename)
 globalThis.__codexIabRuntimeLog = log;
 globalThis.__codexInstallRendererSettingsPatch = (webContents) =>
   installRendererSettingsPatch(webContents, log);
+globalThis.__codexIabInstallTrustedServicePathHooks = (electron) =>
+  installTrustedServicePathHooks({ electron, log });
+
+rewriteTrustedServicesEnv(process.env, log);
+installTrustedServicePathHooks({
+  childProcess: require("node:child_process"),
+  log,
+});
 
 const chromeImportRequest = process.env.CODEX_IAB_CHROME_IMPORT_REQUEST;
 if (chromeImportRequest != null) {
